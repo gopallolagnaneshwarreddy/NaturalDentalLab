@@ -1,0 +1,54 @@
+# Normalize text files in the repository.
+* text=auto
+
+# Windows-oriented source and scripts
+*.cs text eol=crlf
+*.razor text eol=crlf
+*.cshtml text eol=crlf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sql text eol=crlf
+*.sln text eol=crlf
+*.csproj text eol=crlf
+*.props text eol=crlf
+*.targets text eol=crlf
+*.json text eol=crlf
+*.xml text eol=crlf
+
+# Cross-platform documentation and automation
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+*.editorconfig text eol=lf
+*.gitattributes text eol=lf
+*.gitignore text eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.doc binary
+*.docx binary
+*.xls binary
+*.xlsx binary
+*.ppt binary
+*.pptx binary
+*.zip binary
+*.pfx binary
+*.p12 binary
+
+# Do not generate noisy language statistics from generated artifacts.
+*.Designer.cs linguist-generated=true
+*.g.cs linguist-generated=true
+*.g.i.cs linguist-generated=true
+Migrations/*Snapshot.cs linguist-generated=true
+**/Migrations/*Snapshot.cs linguist-generated=true
+
+# Improve GitHub language classification.
+*.razor linguist-language=HTML

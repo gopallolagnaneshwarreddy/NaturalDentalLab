@@ -1,0 +1,210 @@
+﻿@*
+    Pop-up to add a new doctor without leaving the current page (Owner only).
+    Raises OnSaved with the created doctor so the page can select it.
+*@
+@using System.ComponentModel.DataAnnotations
+@using System.Text.RegularExpressions
+@using DentalLab.Application.Abstractions
+@using DentalLab.Domain.Entities
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+
+@inject PermissionStore Permissions
+@inject IDoctorService DoctorService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+@if (Visible)
+{
+    <div class="qa-backdrop" @onclick="CancelAsync"></div>
+    <div class="qa-modal" role="dialog" aria-modal="true" aria-labelledby="qaDoctorTitle">
+        <div class="qa-header">
+            <h5 id="qaDoctorTitle" class="mb-0">Add new doctor</h5>
+            <button type="button" class="btn-close" aria-label="Close" @onclick="CancelAsync"></button>
+        </div>
+
+        <div class="qa-body">
+            <div class="mb-3">
+                <label class="form-label">Name <span class="text-danger">*</span></label>
+                <input @ref="firstInput" class="form-control" @bind="name" @bind:event="oninput" @onkeydown="OnKeyDownAsync" maxlength="100" />
+            </div>
+            <div class="row g-3">
+                <div class="col-sm-6">
+                    <label class="form-label">Phone</label>
+                    <input class="form-control" @bind="phone" @bind:event="oninput" @onkeydown="OnKeyDownAsync" maxlength="20" />
+                </div>
+                <div class="col-sm-6">
+                    <label class="form-label">Email</label>
+                    <input class="form-control" type="email" @bind="email" @bind:event="oninput" @onkeydown="OnKeyDownAsync" maxlength="150" />
+                </div>
+            </div>
+
+            @if (error is not null)
+            {
+                <div class="alert alert-danger mt-3 mb-0">@error</div>
+            }
+        </div>
+
+        <div class="qa-footer">
+            <button type="button" class="btn btn-outline-secondary" disabled="@saving" @onclick="CancelAsync">Cancel</button>
+            <button type="button" class="btn btn-primary" disabled="@saving" @onclick="SaveAsync">
+                @(saving ? "Saving..." : "Save doctor")
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+
+    /// <summary>Name to prefill (what the user typed in the search box).</summary>
+    [Parameter] public string? InitialName { get; set; }
+
+    [Parameter] public EventCallback<Doctor> OnSaved { get; set; }
+
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private static readonly Regex PhonePattern = new(@"^[0-9+\-\s]*$", RegexOptions.Compiled);
+
+    private bool wasVisible;
+    private bool focusPending;
+    private ElementReference firstInput;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusPending && Visible && firstInput.Context is not null)
+        {
+            focusPending = false;
+            try
+            {
+                await firstInput.FocusAsync();
+            }
+            catch
+            {
+                // Element may not be rendered yet (e.g. still loading); ignore.
+            }
+        }
+    }
+    private string name = string.Empty;
+    private string? phone;
+    private string? email;
+    private bool saving;
+    private string? error;
+
+    protected override void OnParametersSet()
+    {
+        // Reset the form each time the pop-up opens.
+        if (Visible && !wasVisible)
+        {
+            focusPending = true;
+            name = InitialName?.Trim() ?? string.Empty;
+            phone = null;
+            email = null;
+            error = null;
+            saving = false;
+        }
+
+        wasVisible = Visible;
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            await SaveAsync();
+        }
+        else if (args.Key == "Escape")
+        {
+            await CancelAsync();
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        if (!saving)
+        {
+            await OnCancel.InvokeAsync();
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (saving)
+        {
+            return;
+        }
+
+        error = null;
+        var trimmedName = name.Trim();
+        var trimmedPhone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
+        var trimmedEmail = string.IsNullOrWhiteSpace(email) ? null : email.Trim();
+
+        if (trimmedName.Length == 0)
+        {
+            error = "Name is required.";
+            return;
+        }
+
+        if (trimmedName.Length > 100)
+        {
+            error = "Name can be at most 100 characters.";
+            return;
+        }
+
+        if (trimmedPhone is not null && (trimmedPhone.Length > 20 || !PhonePattern.IsMatch(trimmedPhone)))
+        {
+            error = "Phone: digits, spaces, + and - only (max 20).";
+            return;
+        }
+
+        if (trimmedEmail is not null && (trimmedEmail.Length > 150 || !new EmailAddressAttribute().IsValid(trimmedEmail)))
+        {
+            error = "Enter a valid email address.";
+            return;
+        }
+
+        // Server-side guard: only the Owner may add doctors from here.
+        var user = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
+        if (!Permissions.IsAllowed(user, Perm.QuickAddDoctor))
+        {
+            error = "You do not have permission to add doctors.";
+            return;
+        }
+
+        saving = true;
+        try
+        {
+            var newId = await DoctorService.CreateAsync(new Doctor
+            {
+                DocName = trimmedName,
+                Phone = trimmedPhone,
+                Email = trimmedEmail,
+                IsActive = true
+            });
+
+            // Re-read so the page gets the saved record (and the correct id).
+            var all = await DoctorService.GetAllAsync();
+            var created = all.FirstOrDefault(d => d.DocId == newId && newId > 0)
+                ?? all.FirstOrDefault(d => string.Equals(d.DocName, trimmedName, StringComparison.OrdinalIgnoreCase));
+
+            if (created is null)
+            {
+                error = "The doctor was saved but could not be loaded. Refresh the page.";
+                return;
+            }
+
+            await OnSaved.InvokeAsync(created);
+        }
+        catch (DbUpdateException)
+        {
+            error = "A doctor with that name already exists.";
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+}

@@ -1,0 +1,270 @@
+﻿@page "/"
+@inject PermissionStore Permissions
+
+<PageTitle>Natural Dental Labs | Case &amp; Billing Console</PageTitle>
+
+<div class="home-shell">
+
+    @* ============ HERO ============ *@
+    <section class="home-hero">
+        <div class="hero-copy">
+            <span class="hero-eyebrow"><i class="pulse-dot"></i> Dental laboratory management</span>
+
+            <AuthorizeView>
+                <Authorized>
+                    <h1>@Greeting, <span class="hero-name">@FirstName(context.User.Identity?.Name)</span></h1>
+                    <p class="hero-lead">
+                        Welcome back to the Natural Dental Labs console. Track incoming cases, manage
+                        doctor pricing and keep monthly billing accurate - all from one place.
+                    </p>
+                    <div class="hero-actions">
+                        @if (Permissions.IsAllowed(context.User, Perm.CasesCreate))
+                        {
+                            <a class="hero-btn primary" href="cases/new">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                                New case
+                            </a>
+                        }
+                        @if (Permissions.IsAllowed(context.User, Perm.DashboardView))
+                        {
+                            <a class="hero-btn ghost" href="dashboard">Open dashboard</a>
+                        }
+                    </div>
+                </Authorized>
+                <NotAuthorized>
+                    <h1>Precision dental work, <span class="hero-name">perfectly managed</span></h1>
+                    <p class="hero-lead">
+                        A single console for case intake, production tracking, doctor-specific pricing
+                        and transparent monthly billing.
+                    </p>
+                    <div class="hero-actions">
+                        <a class="hero-btn primary" href="Account/Login">Sign in to continue</a>
+                    </div>
+                </NotAuthorized>
+            </AuthorizeView>
+
+            <ul class="hero-stats" aria-label="Highlights">
+                <li><strong>End-to-end</strong><span>case tracking</span></li>
+                <li><strong>Per-doctor</strong><span>custom rates</span></li>
+                <li><strong>Monthly</strong><span>billing reports</span></li>
+            </ul>
+        </div>
+
+        <div class="hero-art" aria-hidden="true">
+            <div class="orbit orbit-1"></div>
+            <div class="orbit orbit-2"></div>
+            <div class="tooth-card">
+                <svg viewBox="0 0 40 40" width="84" height="84" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M20 4c-3.2 0-5 1.7-7.4 1.7-2.6 0-4.9-1.4-7-1.1-2.8.4-4.4 3-4.2 6.4.3 5.2 1.7 9.9 3.4 14.3 1.2 3.1 2.1 6.9 4.6 6.9 2.3 0 2.3-4.9 3.6-9.6.7-2.5 1.4-4.3 2.9-4.3s2.3 1.9 2.9 4.3c1.3 4.7 1.3 9.6 3.6 9.6 2.5 0 3.4-3.8 4.6-6.9 1.7-4.4 3.1-9.1 3.4-14.3.2-3.4-1.4-6-4.2-6.4-2.1-.3-4.4 1.1-7 1.1-.7 0-1.4-.2-2.2-.4V4Z" fill="url(#homeToothGrad)"/>
+                    <path d="M22 4.6c1.8-1.6 4-2.2 5.8-1 1.5 1 1.9 2.7 1 4.4-.9 1.7-3.1 3-5.6 2.8" stroke="#b8873a" stroke-width="1.4" stroke-linecap="round"/>
+                    <defs>
+                        <linearGradient id="homeToothGrad" x1="4" y1="4" x2="34" y2="36" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="#ffffff"/>
+                            <stop offset="1" stop-color="#99f6e4"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+            </div>
+            <div class="chip chip-a"><i class="chip-dot ok"></i> Case delivered</div>
+            <div class="chip chip-b"><i class="chip-dot warn"></i> In production</div>
+            <div class="chip chip-c"><i class="chip-dot info"></i> Invoice ready</div>
+        </div>
+    </section>
+
+    @* ============ QUICK ACCESS ============ *@
+    <AuthorizeView>
+        <Authorized>
+            <section class="home-section">
+                <div class="section-head">
+                    <span class="section-kicker">Quick access</span>
+                    <h2>Jump straight to your work</h2>
+                </div>
+
+                <div class="quick-grid">
+                        @if (Permissions.IsAllowed(context.User, Perm.DashboardView))
+                        {
+                        <a class="quick-card" href="dashboard" style="--accent:#0f766e;--tint:#e6f6f4">
+                            <span class="quick-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span>
+                            <h3>Dashboard</h3>
+                            <p>Monthly production, units and billing at a glance.</p>
+                            <span class="quick-go">Open <b>&rarr;</b></span>
+                        </a>
+                        }
+                        @if (Permissions.IsAllowed(context.User, Perm.CasesView))
+                        {
+                        <a class="quick-card" href="cases" style="--accent:#0f6f8a;--tint:#e7f3f6">
+                            <span class="quick-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>
+                            <h3>Cases</h3>
+                            <p>Search, review and update every case received.</p>
+                            <span class="quick-go">Open <b>&rarr;</b></span>
+                        </a>
+                        }
+                        @if (Permissions.IsAllowed(context.User, Perm.ApprovalsView))
+                        {
+                        <a class="quick-card" href="approval-requests" style="--accent:#b8873a;--tint:#faf1de">
+                            <span class="quick-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1Z"/><rect x="5.5" y="6" width="13" height="14.5" rx="2"/><path d="m9 13 2 2 4-4"/></svg></span>
+                            <h3>Approval requests</h3>
+                            <p>Review change and cancellation requests.</p>
+                            <span class="quick-go">Open <b>&rarr;</b></span>
+                        </a>
+                        }
+
+                        @if (Permissions.IsAllowed(context.User, Perm.DoctorsManage))
+                        {
+                        <a class="quick-card" href="doctors" style="--accent:#7c5cbf;--tint:#f0ebfa">
+                            <span class="quick-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c.7-3.4 3-5.4 5.5-5.4s4.8 2 5.5 5.4"/><circle cx="17.5" cy="9" r="2.4"/><path d="M15.7 14.8c2.2.3 3.9 2 4.4 4.5"/></svg></span>
+                            <h3>Doctors</h3>
+                            <p>Manage clinics and the doctors you work with.</p>
+                            <span class="quick-go">Open <b>&rarr;</b></span>
+                        </a>
+                        }
+                        @if (Permissions.IsAllowed(context.User, Perm.RatesManage))
+                        {
+                        <a class="quick-card" href="doctor-rates" style="--accent:#1a8a5e;--tint:#e7f6ee">
+                            <span class="quick-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v9M14.7 9.7c0-1.2-1.2-2.1-2.7-2.1s-2.7.9-2.7 2c0 3 5.4 1.5 5.4 4.4 0 1.2-1.2 2.1-2.7 2.1s-2.7-.9-2.7-2.1"/></svg></span>
+                            <h3>Doctor rates</h3>
+                            <p>Set case-type pricing for each doctor.</p>
+                            <span class="quick-go">Open <b>&rarr;</b></span>
+                        </a>
+                        }
+                        @if (Permissions.IsAllowed(context.User, Perm.BillingView))
+                        {
+                        <a class="quick-card" href="doctor-bill" style="--accent:#c0362c;--tint:#fbeae8">
+                            <span class="quick-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M8 8h8M8 12h5M8 16h8"/></svg></span>
+                            <h3>Doctor bill</h3>
+                            <p>Generate accurate monthly statements.</p>
+                            <span class="quick-go">Open <b>&rarr;</b></span>
+                        </a>
+                        }
+                        @if (Permissions.IsAllowed(context.User, Perm.PaymentsView))
+                        {
+                        <a class="quick-card" href="doctor-payments" style="--accent:#1a8a5e;--tint:#e7f6ee">
+                            <span class="quick-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h3"/><path d="M15.5 15.5l1.5 1.5 3-3.5"/></svg></span>
+                            <h3>Doctor payments</h3>
+                            <p>Record part payments - the rest carries to the next bill as old due.</p>
+                            <span class="quick-go">Open <b>&rarr;</b></span>
+                        </a>
+                        }
+                        @if (Permissions.IsAllowed(context.User, Perm.ReportsMonthly))
+                        {
+                        <a class="quick-card" href="reports/monthly" style="--accent:#b8873a;--tint:#faf1de">
+                            <span class="quick-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="16" rx="2"/><path d="M3.5 9h17M8 17v-3M12 17v-5M16 17v-2"/></svg></span>
+                            <h3>Monthly summary</h3>
+                            <p>Units, case types and doctors for any month - ready to print.</p>
+                            <span class="quick-go">Open <b>&rarr;</b></span>
+                        </a>
+                        }
+                        @if (Permissions.IsAllowed(context.User, Perm.CaseTypesManage))
+                        {
+                        <a class="quick-card" href="case-types" style="--accent:#0b5852;--tint:#e6f6f4">
+                            <span class="quick-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h10M4 19h13"/></svg></span>
+                            <h3>Case types</h3>
+                            <p>Define crowns, bridges, aligners and more.</p>
+                            <span class="quick-go">Open <b>&rarr;</b></span>
+                        </a>
+                        }
+                        @if (Permissions.IsAllowed(context.User, Perm.UsersManage))
+                        {
+                        <a class="quick-card" href="users" style="--accent:#475569;--tint:#eef1f5">
+                            <span class="quick-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9.5" cy="8" r="3.2"/><path d="M3.5 20c.7-3.4 3-5.4 6-5.4s5.3 2 6 5.4M17 8.2h4M19 6.2v4"/></svg></span>
+                            <h3>Users</h3>
+                            <p>Invite team members and control access.</p>
+                            <span class="quick-go">Open <b>&rarr;</b></span>
+                        </a>
+                        }
+
+                    <a class="quick-card" href="Account/Manage" style="--accent:#64748b;--tint:#f1f5f9">
+                        <span class="quick-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5 20c.9-4 3.5-6.2 7-6.2s6.1 2.2 7 6.2"/></svg></span>
+                        <h3>My account</h3>
+                        <p>Profile, password and security settings.</p>
+                        <span class="quick-go">Open <b>&rarr;</b></span>
+                    </a>
+                </div>
+            </section>
+        </Authorized>
+    </AuthorizeView>
+
+    @* ============ WORKFLOW ============ *@
+    <section class="home-section">
+        <div class="section-head">
+            <span class="section-kicker">How it works</span>
+            <h2>From impression to invoice in four steps</h2>
+        </div>
+
+        <ol class="flow">
+            <li class="flow-step">
+                <span class="flow-num">1</span>
+                <h3>Receive</h3>
+                <p>Log each case with the doctor, patient, teeth and case type.</p>
+            </li>
+            <li class="flow-step">
+                <span class="flow-num">2</span>
+                <h3>Produce</h3>
+                <p>Follow every case through production with status updates.</p>
+            </li>
+            <li class="flow-step">
+                <span class="flow-num">3</span>
+                <h3>Approve</h3>
+                <p>Route change and cancellation requests through approval.</p>
+            </li>
+            <li class="flow-step">
+                <span class="flow-num">4</span>
+                <h3>Bill</h3>
+                <p>Apply each doctor's rates and generate the monthly bill.</p>
+            </li>
+        </ol>
+    </section>
+
+    @* ============ FEATURES ============ *@
+    <section class="home-section">
+        <div class="section-head">
+            <span class="section-kicker">Why it helps</span>
+            <h2>Built for the way a dental lab works</h2>
+        </div>
+
+        <div class="feature-grid">
+            <article class="feature">
+                <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4.5 3.2 7.6 8 9 4.8-1.4 8-4.5 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg></span>
+                <h3>Controlled access</h3>
+                <p>Role-based permissions keep pricing and billing visible only to the right people.</p>
+            </article>
+            <article class="feature">
+                <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg></span>
+                <h3>Full audit trail</h3>
+                <p>Changes and cancellations go through approval, so nothing shifts without a record.</p>
+            </article>
+            <article class="feature">
+                <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V9M12 20V4M19 20v-8"/></svg></span>
+                <h3>Clear insights</h3>
+                <p>Live dashboard totals for cases, units and revenue by month and doctor.</p>
+            </article>
+            <article class="feature">
+                <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M11 18.5h2"/></svg></span>
+                <h3>Works on any device</h3>
+                <p>A responsive layout with a slide-out menu, made for desktop, tablet and phone.</p>
+            </article>
+        </div>
+    </section>
+
+    <footer class="home-foot">
+        <span>&copy; @DateTime.Now.Year Natural Dental Labs</span>
+        <span>Crafted with care for precision dentistry &middot; <span class="build-stamp">@DentalLab.Web.BuildInfo.Stamp</span></span>
+    </footer>
+</div>
+
+@code {
+    private static string Greeting => DateTime.Now.Hour switch
+    {
+        < 12 => "Good morning",
+        < 17 => "Good afternoon",
+        _ => "Good evening"
+    };
+
+    // Use the part of the user name before "@" / first word, capitalised
+    private static string FirstName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "there";
+        var part = name.Split('@', ' ', '.')[0];
+        return part.Length == 0 ? "there" : char.ToUpper(part[0]) + part[1..];
+    }
+}

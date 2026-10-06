@@ -1,0 +1,75 @@
+﻿@page "/cases/{CaseId:int}/edit"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.CasesEdit)]
+@using System.Security.Claims
+@using DentalLab.Application.Abstractions
+@using DentalLab.Application.Models
+@using DentalLab.Application.Models.Cases
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@inject ICaseService CaseService
+@inject ICaseApprovalService ApprovalService
+@inject IDoctorRateService RateService
+@inject NavigationManager Nav
+<PageTitle>Edit Case</PageTitle>
+@if (loading) { <p>Loading...</p> }
+else if (model is null) { <div class="alert alert-warning">Case not found or cannot be edited.</div> }
+else
+{
+    <h3>Edit Case @CaseId</h3>
+    @if (RequestId.HasValue) { <div class="alert alert-info">This edit is linked to approved request #@RequestId.</div> }
+    <EditForm Model="model" OnValidSubmit="SaveAsync" FormName="editCaseForm">
+        <DataAnnotationsValidator />
+        <div class="card mb-3"><div class="card-body"><div class="row g-3">
+            <div class="col-md-3"><label class="form-label">Date</label><InputDate class="form-control" @bind-Value="model.CaseDate" /></div>
+            <div class="col-md-4"><label class="form-label">Patient</label><InputText class="form-control" @bind-Value="model.PatientName" /></div>
+            <div class="col-md-3"><label class="form-label">Reference</label><InputText class="form-control" @bind-Value="model.PatientRef" /></div>
+        </div></div></div>
+        @foreach (var line in model.Lines)
+        {
+            <div class="card mb-3" @key="line.ClientLineId"><div class="card-header d-flex justify-content-between"><span>@line.CaseTypeCode - @line.CaseTypeName</span><button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => Remove(line.ClientLineId)">Remove</button></div><div class="card-body">
+                @if (line.Scope == 'A') { <label class="form-label">Arch</label><InputSelect class="form-select" @bind-Value="line.Arch"><option value="U">Upper</option><option value="L">Lower</option></InputSelect> }
+                else { <div class="row g-3"><div class="col-md-3"><label>UR</label><InputText class="form-control" @bind-Value="line.UR" /></div><div class="col-md-3"><label>UL</label><InputText class="form-control" @bind-Value="line.UL" /></div><div class="col-md-3"><label>LR</label><InputText class="form-control" @bind-Value="line.LR" /></div><div class="col-md-3"><label>LL</label><InputText class="form-control" @bind-Value="line.LL" /></div></div> }
+                <div class="mt-2 text-muted">Rate @line.UnitRate.ToString("N2")</div>
+            </div></div>
+        }
+        <div class="card mb-3"><div class="card-body"><label class="form-label">Add line</label><select class="form-select" @onchange="AddLine"><option value="0">-- select case type --</option>@foreach (var rate in rates) { <option value="@rate.CaseTypeId">@rate.CaseTypeCode - @rate.CaseTypeName</option> }</select></div></div>
+        <label class="form-label">Notes</label><InputTextArea class="form-control" rows="3" @bind-Value="model.Notes" />
+        @if (error is not null) { <div class="alert alert-danger mt-3">@error</div> }
+        <div class="mt-3"><button class="btn btn-primary" disabled="@saving">@(saving ? "Saving..." : "Save changes")</button><a class="btn btn-link" href="@($"/cases/{CaseId}")">Cancel</a></div>
+    </EditForm>
+}
+@code {
+    [Parameter] public int CaseId { get; set; }
+    [SupplyParameterFromQuery(Name = "requestId")] public long? RequestId { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+    private CreateCaseRequest? model; private List<DoctorRateListItem> rates = []; private bool loading = true, saving; private string? error;
+    protected override async Task OnParametersSetAsync()
+    {
+        var details = await CaseService.GetByIdAsync(CaseId);
+        if (details is null || details.IsCancelled) { loading = false; return; }
+        model = new() { DocId = details.DocId, CaseDate = details.CaseDate, PatientName = details.PatientName, PatientRef = details.PatientRef, Notes = details.Notes, Lines = details.Lines.Select(x => new CaseLineInput { CaseTypeId = x.CaseTypeId, CaseTypeCode = x.CaseTypeCode, CaseTypeName = x.CaseTypeName, Scope = x.Scope, Arch = x.Arch, UR = x.UR, UL = x.UL, LR = x.LR, LL = x.LL, UnitRate = x.UnitRate, RowVersion = x.RowVersion }).ToList() };
+        rates = await RateService.GetForDoctorAsync(details.DocId); loading = false;
+    }
+    private void Remove(Guid id) { var x = model!.Lines.FirstOrDefault(y => y.ClientLineId == id); if (x != null) model.Lines.Remove(x); }
+    private void AddLine(ChangeEventArgs e) { if (!int.TryParse(e.Value?.ToString(), out var id) || id == 0) return; var r = rates.First(x => x.CaseTypeId == id); model!.Lines.Add(new() { CaseTypeId = r.CaseTypeId, CaseTypeCode = r.CaseTypeCode, CaseTypeName = r.CaseTypeName, Scope = r.Scope, Arch = r.Scope == 'A' ? 'U' : null, UnitRate = r.Cost }); }
+    private async Task SaveAsync()
+    {
+        saving = true; error = null;
+        try
+        {
+            var state = await AuthenticationStateTask;
+            var userId = state.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
+            var email = state.User.FindFirstValue(ClaimTypes.Email) ?? state.User.Identity?.Name ?? string.Empty;
+            var result = await CaseService.UpdateAsync(CaseId, model!, email);
+            if (!result.Succeeded) { error = result.ErrorMessage; return; }
+            if (RequestId.HasValue)
+            {
+                var completed = await ApprovalService.CompleteEditAsync(RequestId.Value, CaseId, userId, email, state.User.IsInRole("Owner"));
+                if (!completed.Succeeded) { error = $"Case saved, but request completion failed: {completed.ErrorMessage}"; return; }
+            }
+            Nav.NavigateTo($"/cases/{CaseId}");
+        }
+        finally { saving = false; }
+    }
+}

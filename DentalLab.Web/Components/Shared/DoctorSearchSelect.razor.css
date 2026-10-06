@@ -1,0 +1,90 @@
+.dss {
+    position: relative;
+    width: 100%;
+}
+
+.dss-input {
+    padding-right: 2rem;
+    cursor: pointer;
+    text-overflow: ellipsis;
+}
+
+.dss-input:focus {
+    cursor: text;
+}
+
+.dss-caret {
+    position: absolute;
+    top: 50%;
+    right: 0.75rem;
+    transform: translateY(-50%);
+    color: #6c757d;
+    font-size: 0.75rem;
+    pointer-events: none;
+}
+
+.dss-disabled .dss-input {
+    cursor: not-allowed;
+}
+
+.dss-list {
+    position: absolute;
+    z-index: 1060;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 280px;
+    overflow-y: auto;
+    margin: 0;
+    padding: 0.25rem 0;
+    list-style: none;
+    background: #fff;
+    border: 1px solid #d6e4e1;
+    border-radius: 10px;
+    box-shadow: 0 10px 28px rgba(15, 50, 46, 0.14);
+}
+
+.dss-item {
+    padding: 0.45rem 0.85rem;
+    cursor: pointer;
+    font-size: 0.92rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dss-item.active {
+    background: #e6f4f1;
+    color: #0b5852;
+}
+
+.dss-item.selected {
+    font-weight: 600;
+}
+
+.dss-item.selected::after {
+    content: " \2713";
+    color: #0f766e;
+}
+
+.dss-empty-option {
+    color: #6c757d;
+    font-style: italic;
+    border-bottom: 1px solid #eef2f1;
+}
+
+.dss-none {
+    padding: 0.55rem 0.85rem;
+    color: #6c757d;
+    font-size: 0.9rem;
+}
+
+.dss-add {
+    color: #0f766e;
+    border-top: 1px solid #eef2f1;
+    white-space: normal;
+}
+
+.dss-add.active {
+    background: #dff3ee;
+}

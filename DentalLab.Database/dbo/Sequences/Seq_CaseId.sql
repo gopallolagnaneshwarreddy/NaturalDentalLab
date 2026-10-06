@@ -1,0 +1,6 @@
+﻿CREATE SEQUENCE [dbo].[Seq_CaseId]
+    AS INT
+    INCREMENT BY 1
+    MINVALUE 1
+    CACHE 20;
+

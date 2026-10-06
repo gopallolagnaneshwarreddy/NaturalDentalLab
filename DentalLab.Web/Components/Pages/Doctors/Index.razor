@@ -1,0 +1,136 @@
+﻿@page "/doctors"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.DoctorsManage)]
+@using DentalLab.Application.Abstractions
+@using DentalLab.Domain.Entities
+@using Microsoft.AspNetCore.Authorization
+@inject IDoctorService DoctorService
+
+<PageTitle>Doctors</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">Doctors</h3>
+    <a class="btn btn-primary" href="/doctors/new">Add doctor</a>
+</div>
+
+<div class="form-check mb-3">
+    <input class="form-check-input" type="checkbox" id="showInactive"
+           checked="@showInactive" @onchange="ToggleInactive" />
+    <label class="form-check-label" for="showInactive">Show inactive</label>
+</div>
+
+@if (doctors is null)
+{
+    <p>Loading...</p>
+}
+else if (doctors.Count == 0)
+{
+    <div class="alert alert-info">No doctors found. Add the first doctor.</div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    @SortHeader("Name", "Name")
+                    @SortHeader("Phone", "Phone")
+                    @SortHeader("Email", "Email")
+                    @SortHeader("Status", "Status")
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var doctor in doctors)
+                {
+                    <tr class="@(doctor.IsActive ? string.Empty : "text-muted")">
+                        <td>@doctor.DocName</td>
+                        <td>@doctor.Phone</td>
+                        <td>@doctor.Email</td>
+                        <td>
+                            <span class="badge bg-@(doctor.IsActive ? "success" : "secondary")">
+                                @(doctor.IsActive ? "Active" : "Inactive")
+                            </span>
+                        </td>
+                        <td class="text-end">
+                            <a class="btn btn-sm btn-outline-primary me-1"
+                               href="@($"/doctors/{doctor.DocId}")">Edit</a>
+
+                            <a class="btn btn-sm btn-outline-info me-1"
+                               href="@($"/doctors/{doctor.DocId}/rates")">Rates</a>
+
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    @onclick="() => ToggleActive(doctor)">
+                                @(doctor.IsActive ? "Deactivate" : "Reactivate")
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<Doctor>? doctors;
+    private bool showInactive;
+    private string sortColumn = "Name";
+    private bool sortDescending;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        doctors = await DoctorService.GetAllAsync(showInactive);
+        ApplySort();
+    }
+
+    private void ApplySort()
+    {
+        if (doctors is null) return;
+
+        Func<Doctor, object?> keySelector = sortColumn switch
+        {
+            "Phone" => d => d.Phone,
+            "Email" => d => d.Email,
+            "Status" => d => d.IsActive,
+            _ => d => d.DocName
+        };
+
+        doctors = (sortDescending
+            ? doctors.OrderByDescending(keySelector)
+            : doctors.OrderBy(keySelector)).ToList();
+    }
+
+    private void SortBy(string column)
+    {
+        if (sortColumn == column) sortDescending = !sortDescending;
+        else { sortColumn = column; sortDescending = false; }
+        ApplySort();
+    }
+
+    private RenderFragment SortHeader(string column, string label)
+    {
+        var isActive = sortColumn == column;
+        var cssClass = "sortable-th" + (isActive ? " sort-active" : "");
+        var icon = isActive ? (sortDescending ? "\u25bc" : "\u25b2") : "\u2195";
+
+        return @<th class="@cssClass" @onclick="() => SortBy(column)">@label<span class="sort-icon">@icon</span></th>;
+    }
+
+    private async Task ToggleInactive(ChangeEventArgs args)
+    {
+        showInactive = args.Value is bool value && value;
+        await LoadAsync();
+    }
+
+    private async Task ToggleActive(Doctor doctor)
+    {
+        await DoctorService.SetActiveAsync(doctor.DocId, !doctor.IsActive);
+        await LoadAsync();
+    }
+}

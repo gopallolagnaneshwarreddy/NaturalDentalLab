@@ -1,0 +1,257 @@
+﻿@page "/doctor-rates"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.RatesManage)]
+
+@using DentalLab.Application.Abstractions
+@using DentalLab.Web.Components.Shared
+@using DentalLab.Application.Models
+@using DentalLab.Domain.Entities
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+
+@inject PermissionStore Permissions
+@inject NavigationManager Navigation
+@inject IDoctorService DoctorService
+@inject ICaseTypeService CaseTypeService
+@inject IDoctorRateService DoctorRateService
+
+<PageTitle>Doctor Rates</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h3 class="mb-1">Doctor Rates</h3>
+        <p class="text-muted mb-0">
+            View and manage case-type pricing across all doctors.
+        </p>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">Doctor</label>
+                <DoctorSearchSelect TItem="Doctor"
+                                    Items="doctors"
+                                    IdOf="d => d.DocId"
+                                    NameOf="d => d.DocName"
+                                    Value="selectedDoctorId"
+                                    ValueChanged="DoctorChanged"
+                                    EmptyText="All doctors"
+                                    Placeholder="All doctors"
+                                    CanAdd="canAddDoctor"
+                                    OnAddNew="OpenAddDoctor" />
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Case type</label>
+                <select class="form-select"
+                        value="@SelectedCaseTypeValue"
+                        @onchange="CaseTypeChanged">
+                    <option value="">All case types</option>
+                    @foreach (var caseType in caseTypes)
+                    {
+                        <option value="@caseType.CaseTypeId">
+                            @caseType.CaseTypeCode - @caseType.CaseTypeName
+                        </option>
+                    }
+                </select>
+            </div>
+
+            <div class="col-md-4 d-flex align-items-end">
+                <div class="form-check mb-2">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           id="showInactiveRates"
+                           checked="@includeInactive"
+                           @onchange="InactiveChanged" />
+                    <label class="form-check-label" for="showInactiveRates">
+                        Show inactive rates
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Loading...</p>
+}
+else if (rates.Count == 0)
+{
+    <div class="alert alert-info">
+        No doctor rates were found for the selected filters.
+    </div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    @SortHeader("Doctor", "Doctor")
+                    @SortHeader("Code", "Code")
+                    @SortHeader("CaseType", "Case Type")
+                    @SortHeader("Scope", "Scope")
+                    @SortHeader("Cost", "Cost", "text-end")
+                    @SortHeader("Status", "Status")
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var rate in rates)
+                {
+                    <tr class="@(rate.IsActive ? string.Empty : "text-muted")">
+                        <td>@rate.DocName</td>
+                        <td><code>@rate.CaseTypeCode</code></td>
+                        <td>@rate.CaseTypeName</td>
+                        <td>
+                            <span class="badge bg-light text-dark">
+                                @(rate.Scope == 'A' ? "Whole arch" : "Per tooth")
+                            </span>
+                        </td>
+                        <td class="text-end">@rate.Cost.ToString("N2")</td>
+                        <td>
+                            <span class="badge bg-@(rate.IsActive ? "success" : "secondary")">
+                                @(rate.IsActive ? "Active" : "Inactive")
+                            </span>
+                        </td>
+                        <td class="text-end">
+                            <a class="btn btn-sm btn-outline-primary"
+                               href="@($"/doctors/{rate.DocId}/rates")">
+                                Manage
+                            </a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<QuickAddDoctorModal Visible="addDoctorOpen"
+                     InitialName="@addDoctorName"
+                     OnSaved="DoctorAddedAsync"
+                     OnCancel="() => addDoctorOpen = false" />
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+
+    private bool canAddDoctor;
+    private bool addDoctorOpen;
+    private string? addDoctorName;
+
+    private void OpenAddDoctor(string typedName)
+    {
+        addDoctorName = typedName;
+        addDoctorOpen = true;
+    }
+
+    private async Task DoctorAddedAsync(Doctor doctor)
+    {
+        addDoctorOpen = false;
+        doctors = await DoctorService.GetAllAsync();
+
+        // Go straight to the new doctor's rates page to add case-type rates.
+        Navigation.NavigateTo($"/doctors/{doctor.DocId}/rates");
+    }
+
+    private List<Doctor> doctors = new();
+    private List<CaseType> caseTypes = new();
+    private List<DoctorRateListItem> rates = new();
+
+    private int? selectedDoctorId;
+    private int? selectedCaseTypeId;
+    private bool includeInactive;
+    private bool isLoading = true;
+    private string sortColumn = "Doctor";
+    private bool sortDescending;
+
+    private string SelectedDoctorValue =>
+        selectedDoctorId?.ToString() ?? string.Empty;
+
+    private string SelectedCaseTypeValue =>
+        selectedCaseTypeId?.ToString() ?? string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        canAddDoctor = Permissions.IsAllowed((await AuthenticationStateTask).User, Perm.QuickAddDoctor);
+        doctors = await DoctorService.GetAllAsync();
+        caseTypes = await CaseTypeService.GetAllAsync();
+        await LoadRatesAsync();
+    }
+
+    private async Task LoadRatesAsync()
+    {
+        isLoading = true;
+
+        try
+        {
+            rates = await DoctorRateService.GetAllAsync(
+                selectedDoctorId,
+                selectedCaseTypeId,
+                includeInactive);
+
+            ApplySort();
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void ApplySort()
+    {
+        Func<DoctorRateListItem, object?> keySelector = sortColumn switch
+        {
+            "Code" => x => x.CaseTypeCode,
+            "CaseType" => x => x.CaseTypeName,
+            "Scope" => x => x.Scope,
+            "Cost" => x => x.Cost,
+            "Status" => x => x.IsActive,
+            _ => x => x.DocName
+        };
+
+        rates = (sortDescending ? rates.OrderByDescending(keySelector) : rates.OrderBy(keySelector)).ToList();
+    }
+
+    private void SortBy(string column)
+    {
+        if (sortColumn == column) sortDescending = !sortDescending;
+        else { sortColumn = column; sortDescending = false; }
+        ApplySort();
+    }
+
+    private RenderFragment SortHeader(string column, string label, string extraClass = "")
+    {
+        var isActive = sortColumn == column;
+        var cssClass = ("sortable-th " + extraClass + (isActive ? " sort-active" : "")).Trim();
+        var icon = isActive ? (sortDescending ? "\u25bc" : "\u25b2") : "\u2195";
+
+        return @<th class="@cssClass" @onclick="() => SortBy(column)">@label<span class="sort-icon">@icon</span></th>;
+    }
+
+    private async Task DoctorChanged(int? doctorId)
+    {
+        selectedDoctorId = doctorId;
+
+        await LoadRatesAsync();
+    }
+
+    private async Task CaseTypeChanged(ChangeEventArgs args)
+    {
+        selectedCaseTypeId = int.TryParse(args.Value?.ToString(), out var caseTypeId)
+            ? caseTypeId
+            : null;
+
+        await LoadRatesAsync();
+    }
+
+    private async Task InactiveChanged(ChangeEventArgs args)
+    {
+        includeInactive = args.Value is bool value && value;
+        await LoadRatesAsync();
+    }
+}

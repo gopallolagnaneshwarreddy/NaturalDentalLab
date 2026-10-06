@@ -1,0 +1,248 @@
+@*
+    Searchable dropdown (combobox) for picking a doctor.
+    - Click / focus the box, type part of the name, pick from the filtered list.
+    - Keyboard: Arrow Up/Down to move, Enter to pick, Esc to cancel.
+    Usage:
+        <DoctorSearchSelect TItem="Doctor" Items="doctors"
+                            IdOf="d => d.DocId" NameOf="d => d.DocName"
+                            @bind-Value="filter.DocId" EmptyText="All doctors" />
+*@
+@typeparam TItem
+
+<div class="dss @(Disabled ? "dss-disabled" : "")">
+    <input type="text"
+           class="form-control @(Small ? "form-control-sm" : "") dss-input"
+           role="combobox"
+           aria-expanded="@(open ? "true" : "false")"
+           autocomplete="off"
+           spellcheck="false"
+           placeholder="@(open ? "Type to search..." : Placeholder)"
+           value="@(open ? searchText : SelectedText)"
+           disabled="@Disabled"
+           @onfocus="OpenList"
+           @onclick="OpenList"
+           @onblur="CloseList"
+           @oninput="OnInput"
+           @onkeydown="OnKeyDownAsync" />
+    <span class="dss-caret" aria-hidden="true">&#9662;</span>
+
+    @if (open)
+    {
+        var options = VisibleOptions;
+        <ul class="dss-list" role="listbox" @onmousedown:preventDefault="true">
+            @if (options.Count == 0)
+            {
+                <li class="dss-none">No doctors match "@searchText"</li>
+            }
+            @if (options.Count > 0)
+            {
+                @for (var i = 0; i < options.Count; i++)
+                {
+                    var index = i;
+                    var option = options[i];
+                    <li class="dss-item @(index == activeIndex ? "active" : "") @(option.Id == Value ? "selected" : "") @(option.Id is null ? "dss-empty-option" : "")"
+                        role="option"
+                        @onmousedown="() => SelectAsync(option.Id)"
+                        @onmousedown:preventDefault="true"
+                        @onmouseover="() => activeIndex = index">
+                        @option.Name
+                    </li>
+                }
+            }
+            @if (ShowAddOption)
+            {
+                var addIndex = options.Count;
+                var typed = searchText.Trim();
+                <li class="dss-item dss-add @(activeIndex == addIndex ? "active" : "")"
+                    role="option"
+                    @onmousedown="RequestAddAsync"
+                    @onmousedown:preventDefault="true"
+                    @onmouseover="() => activeIndex = addIndex">
+                    &#43; Add <strong>&ldquo;@typed&rdquo;</strong> as a new doctor
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    /// <summary>The doctors (or doctor options) to choose from.</summary>
+    [Parameter, EditorRequired] public IEnumerable<TItem> Items { get; set; } = [];
+
+    /// <summary>Returns the doctor id of an item.</summary>
+    [Parameter, EditorRequired] public Func<TItem, int> IdOf { get; set; } = default!;
+
+    /// <summary>Returns the display name of an item.</summary>
+    [Parameter, EditorRequired] public Func<TItem, string?> NameOf { get; set; } = default!;
+
+    /// <summary>Selected doctor id (null = nothing / "all").</summary>
+    [Parameter] public int? Value { get; set; }
+
+    [Parameter] public EventCallback<int?> ValueChanged { get; set; }
+
+    /// <summary>When set, an extra first option (e.g. "All doctors") that clears the selection.</summary>
+    [Parameter] public string? EmptyText { get; set; }
+
+    [Parameter] public string Placeholder { get; set; } = "-- select doctor --";
+
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>Use the small (form-control-sm) size, for filter bars.</summary>
+    [Parameter] public bool Small { get; set; }
+
+    /// <summary>
+    /// Show an "Add as new doctor" option when the typed name is not found.
+    /// Pages pass true only for the Owner.
+    /// </summary>
+    [Parameter] public bool CanAdd { get; set; }
+
+    /// <summary>Raised with the typed name when the user picks "Add as new doctor".</summary>
+    [Parameter] public EventCallback<string> OnAddNew { get; set; }
+
+    private bool ShowAddOption =>
+        CanAdd
+        && !string.IsNullOrWhiteSpace(searchText)
+        && !Items.Any(item => string.Equals(
+            (NameOf(item) ?? string.Empty).Trim(),
+            searchText.Trim(),
+            StringComparison.OrdinalIgnoreCase));
+
+    private int OptionCount => VisibleOptions.Count + (ShowAddOption ? 1 : 0);
+
+    private async Task RequestAddAsync()
+    {
+        var typed = searchText.Trim();
+        CloseList();
+        await OnAddNew.InvokeAsync(typed);
+    }
+
+    private sealed record Option(int? Id, string Name);
+
+    private bool open;
+    private string searchText = string.Empty;
+    private int activeIndex;
+
+    private string SelectedText
+    {
+        get
+        {
+            if (Value is null)
+            {
+                return EmptyText ?? string.Empty;
+            }
+
+            var match = Items.FirstOrDefault(item => IdOf(item) == Value.Value);
+            return match is null ? string.Empty : NameOf(match) ?? string.Empty;
+        }
+    }
+
+    private List<Option> VisibleOptions
+    {
+        get
+        {
+            var tokens = searchText
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            var list = new List<Option>();
+
+            if (EmptyText is not null && tokens.Length == 0)
+            {
+                list.Add(new Option(null, EmptyText));
+            }
+
+            list.AddRange(Items
+                .Select(item => new Option(IdOf(item), NameOf(item) ?? string.Empty))
+                .Where(option => tokens.All(token =>
+                    option.Name.Contains(token, StringComparison.OrdinalIgnoreCase)
+                    || option.Id.ToString() == token))
+                .OrderBy(option => StartsWithAny(option.Name, tokens) ? 0 : 1)
+                .ThenBy(option => option.Name, StringComparer.OrdinalIgnoreCase));
+
+            return list;
+        }
+    }
+
+    private static bool StartsWithAny(string name, string[] tokens) =>
+        tokens.Length > 0 && name.StartsWith(tokens[0], StringComparison.OrdinalIgnoreCase);
+
+    private void OpenList()
+    {
+        if (Disabled || open)
+        {
+            return;
+        }
+
+        open = true;
+        searchText = string.Empty;
+
+        // Start with the current selection highlighted.
+        var options = VisibleOptions;
+        var current = options.FindIndex(option => option.Id == Value);
+        activeIndex = current < 0 ? 0 : current;
+    }
+
+    private void CloseList()
+    {
+        open = false;
+        searchText = string.Empty;
+    }
+
+    private void OnInput(ChangeEventArgs args)
+    {
+        searchText = args.Value?.ToString() ?? string.Empty;
+        open = true;
+        activeIndex = 0;
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        switch (args.Key)
+        {
+            case "ArrowDown":
+                if (!open)
+                {
+                    OpenList();
+                    return;
+                }
+                activeIndex = Math.Min(activeIndex + 1, Math.Max(OptionCount - 1, 0));
+                break;
+
+            case "ArrowUp":
+                activeIndex = Math.Max(activeIndex - 1, 0);
+                break;
+
+            case "Enter":
+                if (open)
+                {
+                    var options = VisibleOptions;
+                    if (activeIndex >= 0 && activeIndex < options.Count)
+                    {
+                        await SelectAsync(options[activeIndex].Id);
+                    }
+                    else if (ShowAddOption && activeIndex == options.Count)
+                    {
+                        await RequestAddAsync();
+                    }
+                }
+                break;
+
+            case "Escape":
+                CloseList();
+                break;
+        }
+    }
+
+    private async Task SelectAsync(int? id)
+    {
+        open = false;
+        searchText = string.Empty;
+
+        if (id == Value)
+        {
+            return;
+        }
+
+        Value = id;
+        await ValueChanged.InvokeAsync(id);
+    }
+}

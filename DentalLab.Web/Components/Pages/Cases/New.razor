@@ -1,0 +1,696 @@
+﻿@page "/cases/new"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.CasesCreate)]
+
+@using System.Security.Claims
+@using DentalLab.Application.Abstractions
+@using DentalLab.Application.Models
+@using DentalLab.Application.Models.Cases
+@using DentalLab.Domain.Entities
+@using DentalLab.Web.Components.Shared
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+
+@inject PermissionStore Permissions
+@inject IDoctorService DoctorService
+@inject IDoctorRateService DoctorRateService
+@inject ICaseService CaseService
+@inject NavigationManager Navigation
+
+<PageTitle>New Case</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h3 class="mb-1">New Case</h3>
+        <p class="text-muted mb-0">Select a doctor, add one or more case lines, then save.</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="/cases">View cases</a>
+</div>
+
+<EditForm Model="model" OnValidSubmit="SaveCaseAsync" FormName="caseEntryForm">
+    <DataAnnotationsValidator />
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-lg-4">
+                    <label class="form-label">Doctor</label>
+                    <DoctorSearchSelect TItem="Doctor"
+                                        Items="doctors"
+                                        IdOf="d => d.DocId"
+                                        NameOf="d => d.DocName"
+                                        Value="@(model.DocId == 0 ? (int?)null : model.DocId)"
+                                        ValueChanged="DoctorChangedAsync"
+                                        Disabled="@(model.Lines.Count > 0)"
+                                        CanAdd="canAddDoctor"
+                                        OnAddNew="OpenAddDoctor" />
+                    <ValidationMessage For="() => model.DocId" />
+
+                    @if (model.Lines.Count > 0)
+                    {
+                        <div class="form-text">Remove all added lines to change the doctor.</div>
+                    }
+                </div>
+
+                <div class="col-lg-3">
+                    <label class="form-label">Case date</label>
+                    <InputDate class="form-control"
+                               @bind-Value="model.CaseDate"
+                               max="@TodayText" />
+                    <ValidationMessage For="() => model.CaseDate" />
+                </div>
+
+                <div class="col-lg-3">
+                    <label class="form-label">Patient name</label>
+                    <InputText class="form-control" @bind-Value="model.PatientName" />
+                    <ValidationMessage For="() => model.PatientName" />
+                </div>
+
+                <div class="col-lg-2">
+                    <label class="form-label">Patient reference</label>
+                    <InputText class="form-control" @bind-Value="model.PatientRef" />
+                    <ValidationMessage For="() => model.PatientRef" />
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-xl-8">
+            <div class="card">
+                <div class="card-header">Add case line</div>
+                <div class="card-body">
+                    @if (model.DocId == 0)
+                    {
+                        <div class="alert alert-info mb-0">Select a doctor first.</div>
+                    }
+                    else if (ratesLoading)
+                    {
+                        <p class="mb-0">Loading the doctor's case types...</p>
+                    }
+                    else if (doctorRates.Count == 0)
+                    {
+                        <div class="alert alert-warning mb-0">
+                            This doctor has no active case-type rates.
+                            @if (canAddRate)
+                            {
+                                <div class="mt-2">
+                                    <button type="button" class="btn btn-sm btn-primary" @onclick="OpenAddRate">
+                                        &#43; Add a case-type rate for this doctor
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="row g-3 mb-4">
+                            <div class="@(canSeePrices ? "col-md-8" : "col-12")">
+                                <div class="d-flex justify-content-between align-items-baseline">
+                                    <label class="form-label">Case type</label>
+                                    @if (canAddRate)
+                                    {
+                                        <button type="button" class="btn btn-link btn-add-inline" @onclick="OpenAddRate"
+                                                title="Case type not in the list? Add a rate for this doctor.">
+                                            &#43; Case type not listed? Add rate
+                                        </button>
+                                    }
+                                </div>
+                                <select class="form-select"
+                                        value="@selectedCaseTypeId"
+                                        @onchange="CaseTypeChanged">
+                                    <option value="0">-- select case type --</option>
+                                    @foreach (var rate in doctorRates)
+                                    {
+                                        <option value="@rate.CaseTypeId">
+                                            @rate.CaseTypeCode - @rate.CaseTypeName@(canSeePrices ? $" ({rate.Cost:N2})" : "")
+                                        </option>
+                                    }
+                                </select>
+                            </div>
+
+                            @if (canSeePrices)
+                            {
+                                <div class="col-md-4">
+                                    <label class="form-label">Unit rate</label>
+                                    <div class="form-control bg-light">
+                                        @(selectedRate is null ? "-" : selectedRate.Cost.ToString("N2"))
+                                    </div>
+                                </div>
+                            }
+                        </div>
+
+                        @if (selectedRate is not null)
+                        {
+                            @if (selectedRate.Scope == 'T')
+                            {
+                                <div class="odontogram">
+                                    <div class="text-muted small mb-3">
+                                        Click a tooth number to select or clear it. Chart is shown from the dentist&#39;s view (patient&#39;s right on the left).
+                                    </div>
+
+                                    <div class="tooth-matrix">
+
+                                        @* Upper Right *@
+                                        <div class="tooth-quadrant tooth-quadrant-right tooth-quadrant-upper">
+                                            <div class="quadrant-title">Patient&#39;s Upper Right</div>
+
+                                            <div class="tooth-row tooth-row-right">
+                                                @foreach (var tooth in RightTeeth)
+                                                {
+                                                    var selected = selectedTeeth[UpperRight].Contains(tooth);
+                                                    var used = IsToothAlreadyUsed(UpperRight, tooth);
+
+                                                    <button type="button"
+                                                            class="@GetToothButtonClass(selected, used)"
+                                                            disabled="@used"
+                                                            @onclick="() => ToggleUpperRight(tooth)">
+                                                        @tooth
+                                                    </button>
+                                                }
+                                            </div>
+                                        </div>
+
+                                        @* Upper Left *@
+                                        <div class="tooth-quadrant tooth-quadrant-left tooth-quadrant-upper">
+                                            <div class="quadrant-title">Patient&#39;s Upper Left</div>
+
+                                            <div class="tooth-row tooth-row-left">
+                                                @foreach (var tooth in LeftTeeth)
+                                                {
+                                                    var selected = selectedTeeth[UpperLeft].Contains(tooth);
+                                                    var used = IsToothAlreadyUsed(UpperLeft, tooth);
+
+                                                    <button type="button"
+                                                            class="@GetToothButtonClass(selected, used)"
+                                                            disabled="@used"
+                                                            @onclick="() => ToggleUpperLeft(tooth)">
+                                                        @tooth
+                                                    </button>
+                                                }
+                                            </div>
+                                        </div>
+
+                                        @* Lower Right *@
+                                        <div class="tooth-quadrant tooth-quadrant-right tooth-quadrant-lower">
+                                            <div class="tooth-row tooth-row-right">
+                                                @foreach (var tooth in RightTeeth)
+                                                {
+                                                    var selected = selectedTeeth[LowerRight].Contains(tooth);
+                                                    var used = IsToothAlreadyUsed(LowerRight, tooth);
+
+                                                    <button type="button"
+                                                            class="@GetToothButtonClass(selected, used)"
+                                                            disabled="@used"
+                                                            @onclick="() => ToggleLowerRight(tooth)">
+                                                        @tooth
+                                                    </button>
+                                                }
+                                            </div>
+
+                                            <div class="quadrant-title quadrant-title-bottom">
+                                                Patient&#39;s Lower Right
+                                            </div>
+                                        </div>
+
+                                        @* Lower Left *@
+                                        <div class="tooth-quadrant tooth-quadrant-left tooth-quadrant-lower">
+                                            <div class="tooth-row tooth-row-left">
+                                                @foreach (var tooth in LeftTeeth)
+                                                {
+                                                    var selected = selectedTeeth[LowerLeft].Contains(tooth);
+                                                    var used = IsToothAlreadyUsed(LowerLeft, tooth);
+
+                                                    <button type="button"
+                                                            class="@GetToothButtonClass(selected, used)"
+                                                            disabled="@used"
+                                                            @onclick="() => ToggleLowerLeft(tooth)">
+                                                        @tooth
+                                                    </button>
+                                                }
+                                            </div>
+
+                                            <div class="quadrant-title quadrant-title-bottom">
+                                                Patient&#39;s Lower Left
+                                            </div>
+                                        </div>
+
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="mb-4">
+                                    <label class="form-label d-block">Arch</label>
+                                    <button type="button"
+                                            class="btn me-2 @(selectedArch == 'U' ? "btn-primary" : "btn-outline-primary")"
+                                            @onclick="SelectUpperArch">
+                                        Upper Arch
+                                    </button>
+                                    <button type="button"
+                                            class="btn @(selectedArch == 'L' ? "btn-primary" : "btn-outline-primary")"
+                                            @onclick="SelectLowerArch">
+                                        Lower Arch
+                                    </button>
+                                </div>
+                            }
+
+                            <div class="d-flex justify-content-between align-items-center mt-4">
+                                <div>
+                                    <strong>Current units:</strong> @CurrentUnits
+                                    @if (canSeePrices)
+                                    {
+                                        <span class="ms-3">
+                                            <strong>Amount:</strong> @CurrentAmount.ToString("N2")
+                                        </span>
+                                    }
+                                </div>
+
+                                <button type="button"
+                                        class="btn btn-primary"
+                                        @onclick="AddLine">
+                                    Add line
+                                </button>
+                            </div>
+                        }
+
+                        @if (!string.IsNullOrWhiteSpace(lineError))
+                        {
+                            <div class="alert alert-danger mt-3 mb-0">@lineError</div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-4">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between">
+                    <span>Added lines</span>
+                    <span class="badge bg-secondary">@model.Lines.Count</span>
+                </div>
+
+                <div class="card-body">
+                    @if (model.Lines.Count == 0)
+                    {
+                        <div class="text-muted">No lines added yet.</div>
+                    }
+                    else
+                    {
+                        @foreach (var line in model.Lines)
+                        {
+                            <div class="border rounded p-3 mb-3" @key="line.ClientLineId">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <strong>@line.CaseTypeCode</strong>
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-danger"
+                                            @onclick="() => RemoveLine(line.ClientLineId)">
+                                        Remove
+                                    </button>
+                                </div>
+
+                                <div>@line.CaseTypeName</div>
+                                <div class="small text-muted">@line.SelectionText</div>
+
+                                <div class="d-flex justify-content-between mt-2">
+                                    <span>@line.Units unit(s)</span>
+                                    @if (canSeePrices)
+                                    {
+                                        <strong>@line.Amount.ToString("N2")</strong>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        <div class="border-top pt-3">
+                            <div class="d-flex justify-content-between">
+                                <span>Total units</span>
+                                <strong>@model.Lines.Sum(x => x.Units)</strong>
+                            </div>
+                            @if (canSeePrices)
+                            {
+                                <div class="d-flex justify-content-between fs-5">
+                                    <span>Total amount</span>
+                                    <strong>@model.Lines.Sum(x => x.Amount).ToString("N2")</strong>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-body">
+            <label class="form-label">Notes</label>
+            <InputTextArea class="form-control" rows="3" @bind-Value="model.Notes" />
+            <ValidationMessage For="() => model.Notes" />
+
+            @if (!string.IsNullOrWhiteSpace(saveError))
+            {
+                <div class="alert alert-danger mt-3">@saveError</div>
+            }
+
+            <div class="mt-3">
+                <button type="submit"
+                        class="btn btn-success"
+                        disabled="@(saving || model.Lines.Count == 0)">
+                    @(saving ? "Saving..." : "Save case")
+                </button>
+                <a class="btn btn-link" href="/cases">Cancel</a>
+            </div>
+        </div>
+    </div>
+</EditForm>
+
+@* Owner quick-add pop-ups (kept outside the form so Enter can't submit the case) *@
+<QuickAddDoctorModal Visible="addDoctorOpen"
+                     InitialName="@addDoctorName"
+                     OnSaved="DoctorAddedAsync"
+                     OnCancel="() => addDoctorOpen = false" />
+
+<QuickAddRateModal Visible="addRateOpen"
+                   DocId="model.DocId"
+                   DocName="@(doctors.FirstOrDefault(d => d.DocId == model.DocId)?.DocName ?? string.Empty)"
+                   OnSaved="RateAddedAsync"
+                   OnCancel="() => addRateOpen = false" />
+
+@code {
+    private const string UpperRight = "UR";
+    private const string UpperLeft = "UL";
+    private const string LowerRight = "LR";
+    private const string LowerLeft = "LL";
+
+    private static readonly int[] RightTeeth = [8, 7, 6, 5, 4, 3, 2, 1];
+    private static readonly int[] LeftTeeth = [1, 2, 3, 4, 5, 6, 7, 8];
+
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+
+    private readonly CreateCaseRequest model = new();
+
+    private readonly Dictionary<string, HashSet<int>> selectedTeeth = new()
+    {
+        [UpperRight] = [],
+        [UpperLeft] = [],
+        [LowerRight] = [],
+        [LowerLeft] = []
+    };
+
+    private List<Doctor> doctors = [];
+    private List<DoctorRateListItem> doctorRates = [];
+    private DoctorRateListItem? selectedRate;
+    private int selectedCaseTypeId;
+    private char? selectedArch;
+    private bool ratesLoading;
+    private bool saving;
+    private bool canSeePrices;
+    private bool canAddDoctor;
+    private bool canAddRate;
+    private bool addDoctorOpen;
+    private string? addDoctorName;
+    private bool addRateOpen;
+    private string? lineError;
+    private string? saveError;
+
+    private string TodayText => DateTime.Today.ToString("yyyy-MM-dd");
+
+    private int CurrentUnits => selectedRate?.Scope == 'A'
+        ? 1
+        : selectedTeeth.Values.Sum(set => set.Count);
+
+    private decimal CurrentAmount => selectedRate is null
+        ? 0
+        : CurrentUnits * selectedRate.Cost;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Prices (rates / amounts) are visible to Owner and Admin only - never to Staff
+        var user = (await AuthenticationStateTask).User;
+        canSeePrices = Permissions.IsAllowed(user, Perm.CasesViewPrices);
+        canAddDoctor = Permissions.IsAllowed(user, Perm.QuickAddDoctor);
+        canAddRate = Permissions.IsAllowed(user, Perm.QuickAddRate);
+
+        doctors = await DoctorService.GetAllAsync();
+    }
+
+    private async Task DoctorChangedAsync(int? docId)
+    {
+        model.DocId = docId ?? 0;
+
+        selectedCaseTypeId = 0;
+        selectedRate = null;
+        doctorRates = [];
+        lineError = null;
+        ClearSelection();
+
+        if (model.DocId == 0)
+        {
+            return;
+        }
+
+        ratesLoading = true;
+        try
+        {
+            doctorRates = await DoctorRateService.GetForDoctorAsync(model.DocId);
+        }
+        finally
+        {
+            ratesLoading = false;
+        }
+    }
+
+    // ---- Owner quick-add: doctor ----
+    private void OpenAddDoctor(string typedName)
+    {
+        addDoctorName = typedName;
+        addDoctorOpen = true;
+    }
+
+    private async Task DoctorAddedAsync(Doctor doctor)
+    {
+        addDoctorOpen = false;
+        doctors = await DoctorService.GetAllAsync();
+        await DoctorChangedAsync(doctor.DocId);
+    }
+
+    // ---- Owner quick-add: case-type rate for the selected doctor ----
+    private void OpenAddRate()
+    {
+        if (model.DocId != 0)
+        {
+            lineError = null;
+            addRateOpen = true;
+        }
+    }
+
+    private async Task RateAddedAsync(int caseTypeId)
+    {
+        addRateOpen = false;
+        doctorRates = await DoctorRateService.GetForDoctorAsync(model.DocId);
+
+        // Select the case type that was just added so the user can continue.
+        selectedCaseTypeId = caseTypeId;
+        selectedRate = doctorRates.FirstOrDefault(rate => rate.CaseTypeId == caseTypeId);
+        lineError = null;
+        ClearSelection();
+    }
+
+    private void CaseTypeChanged(ChangeEventArgs args)
+    {
+        selectedCaseTypeId = int.TryParse(args.Value?.ToString(), out var caseTypeId)
+            ? caseTypeId
+            : 0;
+
+        selectedRate = doctorRates.FirstOrDefault(
+            rate => rate.CaseTypeId == selectedCaseTypeId);
+
+        lineError = null;
+        ClearSelection();
+    }
+
+    private static string GetToothButtonClass(bool selected, bool used)
+    {
+        var colorClass = selected
+            ? "btn-primary"
+            : used
+                ? "btn-secondary"
+                : "btn-outline-secondary";
+
+        return $"btn tooth-button {colorClass}";
+    }
+
+    private void ToggleUpperRight(int tooth)
+    {
+        ToggleTooth(UpperRight, tooth);
+    }
+
+    private void ToggleUpperLeft(int tooth)
+    {
+        ToggleTooth(UpperLeft, tooth);
+    }
+
+    private void ToggleLowerRight(int tooth)
+    {
+        ToggleTooth(LowerRight, tooth);
+    }
+
+    private void ToggleLowerLeft(int tooth)
+    {
+        ToggleTooth(LowerLeft, tooth);
+    }
+
+    private void ToggleTooth(string quadrant, int tooth)
+    {
+        lineError = null;
+
+        if (!selectedTeeth[quadrant].Add(tooth))
+        {
+            selectedTeeth[quadrant].Remove(tooth);
+        }
+    }
+
+    private void SelectUpperArch()
+    {
+        selectedArch = 'U';
+        lineError = null;
+    }
+
+    private void SelectLowerArch()
+    {
+        selectedArch = 'L';
+        lineError = null;
+    }
+
+    private bool IsToothAlreadyUsed(string quadrant, int tooth)
+    {
+        return model.Lines
+            .Where(line => line.Scope == 'T')
+            .Any(line => QuadrantContains(line, quadrant, tooth));
+    }
+
+    private static bool QuadrantContains(
+        CaseLineInput line,
+        string quadrant,
+        int tooth)
+    {
+        var value = quadrant switch
+        {
+            UpperRight => line.UR,
+            UpperLeft => line.UL,
+            LowerRight => line.LR,
+            LowerLeft => line.LL,
+            _ => null
+        };
+
+        return value?.Contains((char)('0' + tooth)) == true;
+    }
+
+    private void AddLine()
+    {
+        lineError = null;
+
+        if (selectedRate is null)
+        {
+            lineError = "Select a case type.";
+            return;
+        }
+
+        if (selectedRate.Scope == 'T' && CurrentUnits == 0)
+        {
+            lineError = "Select at least one tooth.";
+            return;
+        }
+
+        if (selectedRate.Scope == 'A' && selectedArch is not ('U' or 'L'))
+        {
+            lineError = "Select Upper Arch or Lower Arch.";
+            return;
+        }
+
+        model.Lines.Add(new CaseLineInput
+        {
+            CaseTypeId = selectedRate.CaseTypeId,
+            CaseTypeCode = selectedRate.CaseTypeCode,
+            CaseTypeName = selectedRate.CaseTypeName,
+            Scope = selectedRate.Scope,
+            Arch = selectedRate.Scope == 'A' ? selectedArch : null,
+            UR = BuildQuadrant(UpperRight, descending: true),
+            UL = BuildQuadrant(UpperLeft, descending: false),
+            LR = BuildQuadrant(LowerRight, descending: true),
+            LL = BuildQuadrant(LowerLeft, descending: false),
+            UnitRate = selectedRate.Cost
+        });
+
+        selectedCaseTypeId = 0;
+        selectedRate = null;
+        ClearSelection();
+    }
+
+    private string? BuildQuadrant(string quadrant, bool descending)
+    {
+        IEnumerable<int> values = selectedTeeth[quadrant];
+
+        values = descending
+            ? values.OrderByDescending(value => value)
+            : values.OrderBy(value => value);
+
+        var result = string.Concat(values);
+        return result.Length == 0 ? null : result;
+    }
+
+    private void RemoveLine(Guid clientLineId)
+    {
+        var line = model.Lines.FirstOrDefault(
+            item => item.ClientLineId == clientLineId);
+
+        if (line is not null)
+        {
+            model.Lines.Remove(line);
+        }
+    }
+
+    private void ClearSelection()
+    {
+        foreach (var selection in selectedTeeth.Values)
+        {
+            selection.Clear();
+        }
+
+        selectedArch = null;
+    }
+
+    private async Task SaveCaseAsync()
+    {
+        saving = true;
+        saveError = null;
+
+        try
+        {
+            var authenticationState = await AuthenticationStateTask;
+
+            var createdBy = authenticationState.User.FindFirstValue(ClaimTypes.Email)
+                ?? authenticationState.User.Identity?.Name
+                ?? string.Empty;
+
+            var result = await CaseService.CreateAsync(model, createdBy);
+
+            if (!result.Succeeded)
+            {
+                saveError = result.ErrorMessage;
+                return;
+            }
+
+            Navigation.NavigateTo($"/cases?saved={result.CaseId}");
+        }
+        catch (Exception exception)
+        {
+            saveError = exception.Message;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+}

@@ -1,0 +1,26 @@
+@inherits LayoutComponentBase
+@layout DentalLab.Web.Components.Layout.MainLayout
+
+<div class="manage-page">
+    <div class="manage-heading">
+        <h3 class="mb-0">Manage your account</h3>
+        <small class="text-muted">Update your sign-in details and security settings.</small>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-lg-3">
+            <div class="card manage-nav-card">
+                <div class="card-body p-2">
+                    <ManageNavMenu />
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-9">
+            <div class="card manage-content-card">
+                <div class="card-body">
+                    @Body
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

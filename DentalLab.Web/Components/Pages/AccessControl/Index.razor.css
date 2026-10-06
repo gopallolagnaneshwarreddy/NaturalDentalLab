@@ -1,0 +1,34 @@
+.access-table th {
+    background: #f6faf9;
+    vertical-align: bottom;
+}
+
+.role-col {
+    width: 140px;
+}
+
+.group-row td {
+    background: #eef6f4;
+    color: #0b5852;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding-top: 0.45rem;
+    padding-bottom: 0.45rem;
+}
+
+.cell-changed {
+    background: #fff7e0;
+}
+
+.form-switch .form-check-input {
+    width: 2.4em;
+    height: 1.25em;
+    cursor: pointer;
+}
+
+.tiny {
+    font-size: 0.68rem;
+    line-height: 1.1;
+}

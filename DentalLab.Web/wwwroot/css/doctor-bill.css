@@ -1,0 +1,1313 @@
+/* =========================================================================
+   Doctor Bill page styles.
+   A normal (global) stylesheet loaded by App.razor, so it does not depend on
+   Blazor's scoped-CSS build step. Every rule is limited to .doctor-bill-page.
+   ========================================================================= */
+
+.doctor-bill-page {
+    width: 100%;
+    min-width: 0;
+}
+
+.doctor-bill-page .bill-heading {
+    margin-bottom: 0.75rem;
+}
+
+.doctor-bill-page .bill-heading h3 {
+    font-size: 1.65rem;
+}
+
+.doctor-bill-page .filter-card {
+    margin-bottom: 0.75rem;
+}
+
+.doctor-bill-page .filter-card .card-body {
+    padding: 0.7rem;
+}
+
+.doctor-bill-page .bill-filters {
+    display: grid;
+    grid-template-columns: minmax(200px, 1.5fr) minmax(130px, .8fr) minmax(130px, .8fr) minmax(170px, .9fr) auto;
+    align-items: end;
+    gap: 0.6rem;
+}
+
+.doctor-bill-page .options-card {
+    margin-bottom: 1rem;
+}
+
+.doctor-bill-page .options-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: .25rem;
+    padding: .45rem .55rem 0;
+    border-bottom: 1px solid rgba(15, 118, 110, .14);
+}
+
+.doctor-bill-page .options-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    padding: .5rem .85rem .55rem;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    background: none;
+    color: #4f625e;
+    font-family: var(--font-heading, inherit);
+    font-weight: 600;
+    font-size: .86rem;
+    cursor: pointer;
+}
+
+.doctor-bill-page .options-tab:hover {
+    color: #0b5852;
+}
+
+.doctor-bill-page .options-tab.active {
+    color: #0b5852;
+    border-bottom-color: #0f766e;
+}
+
+.doctor-bill-page .tab-badge {
+    min-width: 1.3rem;
+    padding: .05rem .4rem;
+    border-radius: 999px;
+    background: #0f766e;
+    color: #fff;
+    font-size: .7rem;
+    text-align: center;
+}
+
+.doctor-bill-page .tab-hint {
+    font-size: .7rem;
+    font-weight: 500;
+    color: #8a6a2f;
+    background: #faf1de;
+    border-radius: 999px;
+    padding: .05rem .45rem;
+}
+
+.doctor-bill-page .options-hint {
+    margin-left: auto;
+    align-self: center;
+    font-size: .75rem;
+    color: #6b7c78;
+    padding-right: .4rem;
+}
+
+.doctor-bill-page .options-body {
+    padding: .9rem 1rem 1rem;
+}
+
+.doctor-bill-page .options-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: .75rem 1rem;
+    align-items: start;
+}
+
+.doctor-bill-page .adjust-help {
+    font-size: .82rem;
+    color: #4f625e;
+    margin-bottom: .6rem;
+}
+
+.doctor-bill-page .adjust-list {
+    display: grid;
+    gap: .4rem;
+    margin-bottom: .6rem;
+}
+
+.doctor-bill-page .adjust-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) 140px 120px auto;
+    gap: .45rem;
+    align-items: center;
+}
+
+.doctor-bill-page .adjust-amount {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.doctor-bill-page .adjust-result {
+    font-size: .84rem;
+    font-weight: 600;
+    text-align: right;
+    color: #8a968f;
+    font-variant-numeric: tabular-nums;
+}
+
+.doctor-bill-page .adjust-result.minus {
+    color: #c0362c;
+}
+
+.doctor-bill-page .adjust-result.plus {
+    color: #1a8a5e;
+}
+
+.doctor-bill-page .adjust-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .4rem;
+}
+
+.doctor-bill-page .chip {
+    border: 1px solid rgba(15, 118, 110, .25);
+    background: rgba(230, 246, 244, .7);
+    color: #0b5852;
+    border-radius: 999px;
+    padding: .2rem .7rem;
+    font-size: .78rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.doctor-bill-page .chip:hover {
+    background: #0f766e;
+    color: #fff;
+    border-color: #0f766e;
+}
+
+.doctor-bill-page .adjust-total {
+    margin-top: .7rem;
+    font-size: .86rem;
+}
+
+.doctor-bill-page .switch-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: .55rem;
+}
+
+.doctor-bill-page .switch-tile {
+    display: flex;
+    align-items: flex-start;
+    gap: .6rem;
+    padding: .6rem .7rem;
+    border: 1px solid rgba(15, 118, 110, .16);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .55);
+    cursor: pointer;
+    margin: 0;
+}
+
+.doctor-bill-page .switch-tile:hover {
+    border-color: #0f766e;
+}
+
+.doctor-bill-page .switch-tile .form-check-input {
+    flex: none;
+    margin-top: .15rem;
+    width: 2.2em;
+    height: 1.15em;
+}
+
+.doctor-bill-page .switch-tile span {
+    display: grid;
+    line-height: 1.25;
+}
+
+.doctor-bill-page .switch-tile strong {
+    font-size: .86rem;
+}
+
+.doctor-bill-page .switch-tile small {
+    font-size: .74rem;
+    color: #6b7c78;
+}
+
+.doctor-bill-page .pay-preview-box {
+    min-height: calc(1.5em + .5rem + 2px);
+    padding: .3rem .6rem;
+    border: 1px dashed rgba(15, 118, 110, .35);
+    border-radius: 8px;
+    background: rgba(230, 246, 244, .55);
+    color: #0b5852;
+    font-weight: 600;
+    font-size: .85rem;
+}
+
+.doctor-bill-page .filter-field {
+    min-width: 0;
+}
+
+.doctor-bill-page .filter-field .form-label {
+    display: block;
+    margin-bottom: 0.2rem;
+    color: #495057;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.doctor-bill-page .filter-field .form-control,
+.doctor-bill-page .filter-field .form-select {
+    width: 100%;
+    min-width: 0;
+    font-size: 0.85rem;
+}
+
+.doctor-bill-page .filter-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    white-space: nowrap;
+}
+
+.doctor-bill-page .bill-sheet {
+    position: relative;
+    z-index: 1;
+    min-height: 500px;
+    background: #fff;
+    border: 1px solid var(--line, #e7e2d6);
+    border-radius: 16px;
+    padding: 1.5rem;
+    box-shadow: 0 7px 24px rgba(23, 43, 40, .05);
+}
+
+.doctor-bill-page .has-watermark::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 70%;
+    height: 70%;
+    background-image: url("/images/logo.png");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    opacity: 0.15;
+    z-index: 0;
+    pointer-events: none;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+
+.doctor-bill-page .bill-print-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 1rem;
+}
+
+.doctor-bill-page .bill-letterhead {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem 1.5rem;
+    padding-bottom: 1.1rem;
+    margin-bottom: 1.1rem;
+    border-bottom: 2px solid #0f766e;
+}
+
+.doctor-bill-page .bill-brand {
+    display: flex;
+    align-items: center;
+    gap: .65rem;
+}
+
+.doctor-bill-page .bill-brand-mark {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    border-radius: 12px;
+    background: #e6f6f4;
+    flex-shrink: 0;
+}
+
+.doctor-bill-page .bill-brand div {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+}
+
+.doctor-bill-page .bill-brand strong {
+    font-family: var(--font-heading, inherit);
+    font-size: 1.05rem;
+    color: #172321;
+}
+
+.doctor-bill-page .bill-brand span {
+    font-size: .75rem;
+    color: var(--muted, #6b7280);
+}
+
+.doctor-bill-page .bill-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem 1.5rem;
+    text-align: right;
+}
+
+.doctor-bill-page .bill-meta div {
+    display: flex;
+    flex-direction: column;
+    gap: .1rem;
+}
+
+.doctor-bill-page .bill-meta span {
+    font-size: .68rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--muted, #6b7280);
+}
+
+.doctor-bill-page .bill-meta strong {
+    font-size: .88rem;
+    color: #172321;
+    word-break: break-word;
+}
+
+.doctor-bill-page .bill-gstin {
+    font-size: 1.05em;
+    margin-bottom: 10px;
+}
+
+.doctor-bill-page .bill-table-container {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    margin-bottom: 1rem;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+}
+
+.doctor-bill-page .bill-table {
+    width: 100%;
+    min-width: 820px;
+    margin-bottom: 0;
+    font-size: 0.78rem;
+}
+
+.doctor-bill-page .bill-table > :not(caption) > * > * {
+    padding: 0.4rem 0.5rem;
+}
+
+.doctor-bill-page .bill-table thead th {
+    color: #212529;
+    font-size: 0.7rem;
+    font-weight: 700;
+    white-space: nowrap;
+    background-color: #f8f9fa;
+}
+
+.doctor-bill-page .case-id-cell {
+    color: #0f766e;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.doctor-bill-page .patient-cell {
+    display: flex;
+    flex-direction: column;
+    min-width: 75px;
+    line-height: 1.2;
+}
+
+.doctor-bill-page .patient-cell small {
+    margin-top: 0.15rem;
+    font-size: 0.68rem;
+}
+
+.doctor-bill-page .teeth-cell {
+    min-width: 130px;
+    max-width: 210px;
+}
+
+.doctor-bill-page .case-badge {
+    max-width: 100px;
+    padding: 0.25rem 0.4rem;
+    overflow: hidden;
+    font-size: 0.66rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.doctor-bill-page .total-amount-cell {
+    font-weight: 700;
+    background-color: #f8f9fa;
+}
+
+.doctor-bill-page .bill-table tbody.bill-case-group:hover > tr > td {
+    background-color: var(--brand-tint, #e6f6f4);
+}
+
+.doctor-bill-page .bill-table tbody.bill-case-group:hover > tr > td.total-amount-cell {
+    background-color: #d3efeb;
+}
+
+.doctor-bill-page .bill-totals-section {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 1.25rem;
+    margin-top: 20px;
+    page-break-inside: avoid;
+}
+
+.doctor-bill-page .type-summary-table,
+.doctor-bill-page .bill-summary {
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.doctor-bill-page .type-summary-table table {
+    width: 100%;
+    table-layout: fixed;
+    margin-bottom: 0;
+}
+
+.doctor-bill-page .type-summary-table td,
+.doctor-bill-page .type-summary-table th {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.doctor-bill-page .type-summary-table {
+    border-radius: var(--radius-md, 8px);
+}
+
+.doctor-bill-page .bill-summary {
+    border: 1px solid #dee2e6;
+    border-radius: var(--radius-md, 8px);
+    background: #fff;
+    max-width: 340px;
+    margin-left: auto;
+    display: grid;
+    gap: .5rem;
+    padding: .9rem 1rem;
+}
+
+.doctor-bill-page .bill-summary-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: .75rem;
+    font-size: .88rem;
+    color: #3d453f;
+}
+
+.doctor-bill-page .bill-grand-total {
+    padding: .65rem .85rem;
+    margin-top: .25rem;
+    border-radius: 12px;
+    background: #e6f6f4;
+    font-size: 1.05rem;
+}
+
+.doctor-bill-page .bill-grand-total strong {
+    color: #0b5852;
+    font-family: var(--font-heading, inherit);
+}
+
+.doctor-bill-page .bill-summary-row.adj-minus {
+    color: #c0362c;
+}
+
+.doctor-bill-page .bill-summary-row.adj-plus {
+    color: #1a8a5e;
+}
+
+.doctor-bill-page .bill-closing {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    gap: .7rem;
+    margin-top: 1.4rem;
+}
+
+.doctor-bill-page .bill-label {
+    display: block;
+    font-size: .72rem;
+    font-weight: 700;
+    color: #6b7c78;
+    margin-bottom: .1rem;
+}
+
+.doctor-bill-page .bill-words-text {
+    font-style: italic;
+}
+
+.doctor-bill-page .bill-pay-line {
+    justify-self: start;
+    padding: .45rem .9rem;
+    border-radius: 10px;
+    background: #e6f6f4;
+    border: 1px solid rgba(15, 118, 110, .25);
+    color: #0b5852;
+    font-weight: 700;
+}
+
+.doctor-bill-page .bill-note {
+    padding: .55rem .8rem;
+    border-left: 3px solid #b8873a;
+    background: #faf1de;
+    border-radius: 0 8px 8px 0;
+}
+
+.doctor-bill-page .bill-note-text {
+    white-space: pre-line;
+}
+
+.doctor-bill-page .bill-footer {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: .3rem 1rem;
+    margin-top: 1.6rem;
+    padding-top: .6rem;
+    border-top: 1px solid #dbe6e3;
+    color: #3d453f;
+    font-size: .85rem;
+}
+
+.doctor-bill-page .bill-footer strong {
+    font-family: "Caveat", "Bradley Hand ITC", "Bradley Hand", cursive;
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #1d2a28;
+}
+
+@media print {
+    @page  {
+        size: A4 portrait;
+        margin: 12mm 10mm;
+    }
+    body {
+        background-color: white !important;
+    }
+    * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        color-adjust: exact !important;
+    }
+    .doctor-bill-page {
+        width: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    .doctor-bill-page .bill-sheet {
+        border: none;
+        box-shadow: none;
+        padding: 0;
+    }
+    .doctor-bill-page .table-responsive,
+    .doctor-bill-page .bill-table-container {
+        overflow: visible !important;
+        width: 100% !important;
+    }
+    .doctor-bill-page .bill-table {
+        width: 100% !important;
+        min-width: 0 !important;
+        table-layout: auto !important;
+        font-size: 10.5px;
+        border-collapse: collapse !important;
+    }
+    .doctor-bill-page .bill-table thead {
+        display: table-header-group;
+    }
+    .doctor-bill-page .bill-table tbody.bill-case-group {
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
+    .doctor-bill-page .bill-table tr {
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
+    .doctor-bill-page .bill-table th,
+    .doctor-bill-page .bill-table td {
+        border: 1px solid #000 !important;
+        padding: 3px 4px !important;
+        background-color: transparent !important;
+    }
+    .doctor-bill-page .bill-totals-section,
+    .doctor-bill-page .bill-closing,
+    .doctor-bill-page .bill-footer {
+        page-break-inside: avoid;
+        break-inside: avoid;
+        width: 100% !important;
+    }
+    .doctor-bill-page .bill-pay-line,
+    .doctor-bill-page .bill-note {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    .doctor-bill-page .bill-totals-section {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+    }
+    .doctor-bill-page .bill-summary {
+        border-color: #000 !important;
+    }
+}
+
+@media (max-width: 1000px) {
+    .doctor-bill-page .bill-filters {
+        grid-template-columns: 1fr 1fr;
+    }
+    .doctor-bill-page .filter-actions {
+        grid-column: 1 / -1;
+    }
+    .doctor-bill-page .bill-letterhead {
+        flex-direction: column;
+    }
+    .doctor-bill-page .bill-meta {
+        text-align: left;
+    }
+}
+
+@media (max-width: 720px) {
+    .doctor-bill-page .bill-filters {
+        grid-template-columns: 1fr;
+    }
+    .doctor-bill-page .adjust-row {
+        grid-template-columns: 1fr 110px auto;
+    }
+    .doctor-bill-page .adjust-row .adjust-result {
+        grid-column: 1 / -1;
+        text-align: left;
+    }
+    .doctor-bill-page .options-hint {
+        display: none;
+    }
+    .doctor-bill-page .bill-sheet {
+        padding: 1rem;
+    }
+    .doctor-bill-page .bill-totals-section {
+        grid-template-columns: 1fr;
+    }
+    .doctor-bill-page .bill-summary {
+        margin-left: 0;
+        max-width: none;
+    }
+    .doctor-bill-page .bill-print-actions {
+        flex-wrap: wrap;
+    }
+}
+
+.doctor-bill-page .act-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: .45rem;
+    height: 36px;
+    padding: 0 1rem;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    font-family: var(--font-heading, inherit);
+    font-size: .85rem;
+    font-weight: 700;
+    letter-spacing: .005em;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .15s ease, color .15s ease;
+}
+
+.doctor-bill-page .act-btn svg {
+    flex: none;
+}
+
+.doctor-bill-page .act-btn:focus-visible {
+    outline: 3px solid rgba(20, 184, 166, .45);
+    outline-offset: 2px;
+}
+
+.doctor-bill-page .act-btn:active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+.doctor-bill-page .act-btn:disabled {
+    cursor: not-allowed;
+    opacity: .55;
+    box-shadow: none;
+}
+
+.doctor-bill-page .act-primary {
+    color: #fff;
+    background: linear-gradient(180deg, #13887e 0%, #0f766e 55%, #0b5852 100%);
+    border-color: #0b5852;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .25) inset, 0 4px 12px rgba(15, 118, 110, .28);
+}
+
+.doctor-bill-page .act-primary:hover:not(:disabled) {
+    background: linear-gradient(180deg, #11786f 0%, #0c655e 55%, #094a45 100%);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .25) inset, 0 8px 20px rgba(15, 118, 110, .34);
+}
+
+.doctor-bill-page .act-secondary {
+    color: #0b5852;
+    background: rgba(255, 255, 255, .85);
+    border-color: rgba(15, 118, 110, .35);
+    box-shadow: 0 1px 2px rgba(15, 60, 55, .08);
+}
+
+.doctor-bill-page .act-secondary:hover:not(:disabled) {
+    background: #e6f6f4;
+    border-color: #0f766e;
+}
+
+.doctor-bill-page .act-ghost {
+    color: #5d716d;
+    background: transparent;
+    border-color: transparent;
+    padding: 0 .75rem;
+}
+
+.doctor-bill-page .act-ghost:hover:not(:disabled) {
+    color: #0b5852;
+    background: rgba(15, 118, 110, .08);
+}
+
+.doctor-bill-page .act-add {
+    height: 32px;
+    padding: 0 .85rem;
+    color: #0b5852;
+    background: rgba(230, 246, 244, .55);
+    border: 1px dashed rgba(15, 118, 110, .5);
+    font-size: .8rem;
+}
+
+.doctor-bill-page .act-add:hover {
+    background: #e6f6f4;
+    border-style: solid;
+}
+
+.doctor-bill-page .icon-btn {
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #6b7c78;
+    cursor: pointer;
+    transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+}
+
+.doctor-bill-page .icon-btn.icon-danger:hover {
+    color: #c0362c;
+    background: #fbeae8;
+    border-color: rgba(192, 54, 44, .25);
+}
+
+.doctor-bill-page .icon-btn:focus-visible {
+    outline: 3px solid rgba(192, 54, 44, .3);
+    outline-offset: 1px;
+}
+
+.doctor-bill-page .filter-actions {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+}
+
+.doctor-bill-page .seg {
+    display: flex;
+    width: 100%;
+    height: 31px;
+    padding: 3px;
+    border-radius: 9px;
+    background: rgba(15, 118, 110, .08);
+    border: 1px solid rgba(15, 118, 110, .14);
+}
+
+.doctor-bill-page .seg-btn {
+    flex: 1;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: #4f625e;
+    font-size: .78rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color .15s ease, color .15s ease, box-shadow .15s ease;
+}
+
+.doctor-bill-page .seg-btn:hover {
+    color: #0b5852;
+}
+
+.doctor-bill-page .seg-btn.active {
+    background: #fff;
+    color: #0b5852;
+    box-shadow: 0 1px 3px rgba(15, 60, 55, .15);
+}
+
+.doctor-bill-page .seg-btn:focus-visible {
+    outline: 2px solid rgba(20, 184, 166, .5);
+    outline-offset: 1px;
+}
+
+.doctor-bill-page .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+}
+
+.doctor-bill-page .chip::before {
+    content: "+";
+    font-weight: 800;
+    opacity: .7;
+}
+
+.doctor-bill-page .bill-actionbar {
+    position: sticky;
+    top: .5rem;
+    z-index: 30;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: .6rem 1rem;
+    margin-bottom: .9rem;
+    padding: .6rem .7rem .6rem 1rem;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .78);
+    border: 1px solid rgba(255, 255, 255, .85);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    box-shadow: 0 8px 26px rgba(15, 60, 55, .12);
+}
+
+.doctor-bill-page .bill-actionbar-info {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .35rem .9rem;
+    min-width: 0;
+    font-size: .86rem;
+}
+
+.doctor-bill-page .bill-ready-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #1a8a5e;
+    box-shadow: 0 0 0 4px rgba(26, 138, 94, .15);
+}
+
+.doctor-bill-page .bill-actionbar-total {
+    padding: .2rem .65rem;
+    border-radius: 999px;
+    background: #e6f6f4;
+    color: #4f625e;
+    font-size: .8rem;
+}
+
+.doctor-bill-page .bill-actionbar-total strong {
+    color: #0b5852;
+    font-family: var(--font-heading, inherit);
+    margin-left: .25rem;
+}
+
+.doctor-bill-page .bill-actionbar-buttons {
+    display: flex;
+    gap: .45rem;
+}
+
+@media (max-width: 720px) {
+    .doctor-bill-page .bill-actionbar {
+        position: static;
+    }
+    .doctor-bill-page .bill-actionbar-buttons {
+        width: 100%;
+    }
+    .doctor-bill-page .bill-actionbar-buttons .act-btn {
+        flex: 1;
+    }
+    .doctor-bill-page .filter-actions .act-primary {
+        flex: 1;
+    }
+}
+
+@media print {
+    .doctor-bill-page .bill-actionbar {
+        display: none !important;
+    }
+}
+
+.doctor-bill-page .bill-upi {
+    display: flex;
+    align-items: center;
+    gap: .9rem;
+    padding: .6rem .8rem;
+    border: 1px solid rgba(15, 118, 110, .3);
+    border-radius: 12px;
+    background: #e6f6f4;
+    max-width: 520px;
+}
+
+.doctor-bill-page .bill-upi-qr {
+    flex: none;
+    width: 112px;
+    height: 112px;
+    padding: 4px;
+    border-radius: 8px;
+    background: #fff;
+    image-rendering: pixelated;
+}
+
+.doctor-bill-page .bill-upi-text {
+    display: grid;
+    gap: .15rem;
+    min-width: 0;
+}
+
+.doctor-bill-page .bill-upi-text > strong {
+    font-family: var(--font-heading, inherit);
+    color: #0b5852;
+}
+
+.doctor-bill-page .bill-upi-link {
+    font-weight: 700;
+    color: #0f766e;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.doctor-bill-page .bill-upi-meta {
+    font-size: .8rem;
+    color: #4f625e;
+    word-break: break-word;
+}
+
+.doctor-bill-page .upi-grid .invalid-feedback {
+    display: block;
+}
+
+@media print {
+    .doctor-bill-page .bill-upi {
+        break-inside: avoid;
+        page-break-inside: avoid;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    .doctor-bill-page .bill-upi-link {
+        text-decoration: none;
+        color: #0b5852;
+    }
+}
+
+.doctor-bill-page .bill-filters {
+    --ctl-h: 38px;
+}
+
+.doctor-bill-page .bill-filters .form-control,
+.doctor-bill-page .bill-filters .form-select,
+.doctor-bill-page .bill-filters .dss-input {
+    height: var(--ctl-h);
+}
+
+.doctor-bill-page .bill-filters .seg {
+    height: var(--ctl-h);
+}
+
+.doctor-bill-page .bill-filters .act-btn {
+    height: var(--ctl-h);
+}
+
+.doctor-bill-page .bill-filters .filter-field .form-label {
+    min-height: 1.1rem;
+}
+
+.doctor-bill-page .act-btn.act-sm {
+    height: 32px;
+    padding: 0 .8rem;
+    font-size: .8rem;
+}
+
+.doctor-bill-page .pay-sections {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.doctor-bill-page .pay-section {
+    display: grid;
+    gap: .65rem;
+    align-content: start;
+    padding: .85rem .9rem .9rem;
+    border: 1px solid rgba(15, 118, 110, .14);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .5);
+}
+
+.doctor-bill-page .pay-section-title {
+    margin: 0;
+    font-size: .9rem;
+    color: #0b5852;
+}
+
+.doctor-bill-page .pay-section-title small {
+    font-family: var(--font-body, inherit);
+    font-weight: 500;
+    font-size: .74rem;
+    color: #6b7c78;
+    margin-left: .3rem;
+}
+
+.doctor-bill-page .pay-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .6rem;
+}
+
+.doctor-bill-page .defaults-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem 1rem;
+    margin-top: .9rem;
+    padding: .55rem .7rem;
+    border-radius: 12px;
+    background: rgba(230, 246, 244, .6);
+    border: 1px solid rgba(15, 118, 110, .14);
+}
+
+.doctor-bill-page .defaults-info {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .35rem .5rem;
+    font-size: .82rem;
+    color: #3d453f;
+}
+
+.doctor-bill-page .defaults-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #1a8a5e;
+    box-shadow: 0 0 0 3px rgba(26, 138, 94, .15);
+}
+
+.doctor-bill-page .defaults-dot.changed {
+    background: #b8873a;
+    box-shadow: 0 0 0 3px rgba(184, 135, 58, .18);
+}
+
+.doctor-bill-page .defaults-actions {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+}
+
+.doctor-bill-page .defaults-owner-note {
+    font-size: .78rem;
+    color: #6b7c78;
+}
+
+.doctor-bill-page .defaults-message {
+    margin-top: .45rem;
+    font-size: .82rem;
+    color: #1a8a5e;
+}
+
+.doctor-bill-page .defaults-message.is-error {
+    color: #c0362c;
+}
+
+@media (max-width: 900px) {
+    .doctor-bill-page .pay-sections {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 520px) {
+    .doctor-bill-page .pay-fields {
+        grid-template-columns: 1fr;
+    }
+}
+
+.doctor-bill-page .upi-ask {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .6rem .9rem;
+    margin-top: .9rem;
+    padding: .7rem .85rem;
+    border-radius: 12px;
+    border: 1px solid rgba(184, 135, 58, .45);
+    background: linear-gradient(180deg, #fff8e8, #faf1de);
+    box-shadow: 0 6px 18px rgba(184, 135, 58, .14);
+    animation: upi-ask-in .22s ease-out;
+}
+
+@keyframes upi-ask-in {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.doctor-bill-page .upi-ask-icon {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    background: #fff;
+    color: #b8873a;
+    box-shadow: 0 1px 3px rgba(184, 135, 58, .25);
+}
+
+.doctor-bill-page .upi-ask-text {
+    display: grid;
+    gap: .1rem;
+    flex: 1 1 260px;
+    min-width: 0;
+    font-size: .82rem;
+    color: #5c4a26;
+}
+
+.doctor-bill-page .upi-ask-text strong {
+    font-size: .9rem;
+    color: #3d2f12;
+}
+
+.doctor-bill-page .upi-ask-id {
+    font-family: ui-monospace, Consolas, monospace;
+    background: #fff;
+    padding: 0 .3rem;
+    border-radius: 5px;
+    word-break: break-all;
+}
+
+.doctor-bill-page .upi-ask-actions {
+    display: flex;
+    gap: .4rem;
+    margin-left: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .doctor-bill-page .upi-ask {
+        animation: none;
+    }
+}
+
+/* Inputs inside an input group (e.g. GST: [x] [12] [%]) share one row
+   instead of each taking the full width. */
+.doctor-bill-page .input-group {
+    flex-wrap: nowrap;
+}
+.doctor-bill-page .filter-field .input-group > .form-control {
+    width: 1%;
+    flex: 1 1 auto;
+}
+.doctor-bill-page .input-group .input-group-text .form-check-input {
+    width: 1.05em;
+    height: 1.05em;
+    cursor: pointer;
+}
+.doctor-bill-page .options-grid .input-group-sm > .form-control,
+.doctor-bill-page .options-grid .input-group-sm > .input-group-text {
+    min-height: 38px;
+}
+
+/* ---------- Old due from Doctor Payments (auto) ---------- */
+.doctor-bill-page .auto-pill {
+    display: inline-block;
+    margin-left: .3rem;
+    padding: 0 .45rem;
+    border-radius: 999px;
+    font-size: .66rem;
+    font-weight: 700;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    vertical-align: middle;
+    color: #0b5852;
+    background: rgba(230, 246, 244, .95);
+    border: 1px solid rgba(15, 118, 110, .25);
+}
+
+.doctor-bill-page .auto-pill.is-edited {
+    color: #8a5a12;
+    background: rgba(250, 241, 222, .95);
+    border-color: rgba(184, 135, 58, .3);
+}
+
+.doctor-bill-page .due-calc {
+    line-height: 1.45;
+}
+
+.doctor-bill-page .link-btn {
+    display: inline;
+    margin-left: .3rem;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: #0b5852;
+    font-weight: 700;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.doctor-bill-page .adjust-help-note {
+    padding: .45rem .65rem;
+    border-radius: 9px;
+    background: rgba(231, 243, 246, .7);
+    border: 1px solid rgba(15, 111, 138, .15);
+    color: #0b5468;
+}
+
+.doctor-bill-page .bill-summary-row.due-paid {
+    color: #1a8a5e;
+}
+
+.doctor-bill-page .ledger-status {
+    align-self: center;
+    padding: .2rem .6rem;
+    border-radius: 999px;
+    font-size: .74rem;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: help;
+}
+
+.doctor-bill-page .ledger-status.is-ok {
+    color: #135f40;
+    background: rgba(231, 246, 238, .95);
+    border: 1px solid rgba(26, 138, 94, .25);
+}
+
+.doctor-bill-page .ledger-status.is-warn {
+    color: #8a5a12;
+    background: rgba(250, 241, 222, .95);
+    border: 1px solid rgba(184, 135, 58, .3);
+}
+
+.doctor-bill-page .ledger-status.is-muted {
+    color: #6b7280;
+    background: rgba(241, 245, 249, .9);
+    border: 1px solid rgba(107, 114, 128, .18);
+}
+
+@media (max-width: 720px) {
+    .doctor-bill-page .bill-actionbar-buttons {
+        flex-wrap: wrap;
+    }
+    .doctor-bill-page .ledger-status {
+        width: 100%;
+        text-align: center;
+    }
+}

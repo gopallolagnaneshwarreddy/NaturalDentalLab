@@ -1,0 +1,362 @@
+﻿@page "/doctors/{DocId:int}/rates"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.RatesManage)]
+
+@using System.ComponentModel.DataAnnotations
+@using DentalLab.Application.Abstractions
+@using DentalLab.Application.Models
+@using DentalLab.Domain.Entities
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+
+@inject IDoctorService DoctorService
+@inject IDoctorRateService RateService
+@inject NavigationManager Nav
+
+<PageTitle>Rate Card</PageTitle>
+
+@if (doctor is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <div class="rate-page">
+        <div class="rate-heading">
+            <div>
+                <h3 class="mb-1">Rate Card</h3>
+                <p class="text-muted mb-0">@doctor.DocName</p>
+            </div>
+
+            <a class="btn btn-sm btn-outline-secondary" href="/doctors">Back</a>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(successMessage))
+        {
+            <div class="alert alert-success alert-dismissible fade show py-2" role="alert">
+                @successMessage
+                <button type="button"
+                        class="btn-close"
+                        aria-label="Close"
+                        @onclick="() => successMessage = null">
+                </button>
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(error))
+        {
+            <div class="alert alert-danger alert-dismissible fade show py-2" role="alert">
+                @error
+                <button type="button"
+                        class="btn-close"
+                        aria-label="Close"
+                        @onclick="() => error = null">
+                </button>
+            </div>
+        }
+
+        <div class="row g-3">
+            <div class="col-xl-9 col-lg-8">
+                @if (rates is null)
+                {
+                    <p>Loading...</p>
+                }
+                else if (rates.Count == 0)
+                {
+                    <div class="alert alert-info">No rates have been configured for this doctor.</div>
+                }
+                else
+                {
+                    <div class="table-responsive rate-table-wrapper">
+                        <table class="table table-sm table-hover align-middle rate-table">
+                            <thead>
+                                <tr>
+                                    <th>Code</th>
+                                    <th>Name</th>
+                                    <th>Scope</th>
+                                    <th class="text-end">Cost</th>
+                                    <th>Status</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var rate in rates)
+                                {
+                                    var key = GetRateKey(rate);
+
+                                    <tr class="@(!rate.IsActive ? "inactive-rate" : null)">
+                                        <td><code>@rate.CaseTypeCode</code></td>
+                                        <td>@rate.CaseTypeName</td>
+                                        <td>
+                                            <span class="badge text-bg-light">
+                                                @(rate.Scope == 'A' ? "Arch" : "Tooth")
+                                            </span>
+                                        </td>
+                                        <td class="text-end text-nowrap">@rate.Cost.ToString("N2")</td>
+                                        <td>
+                                            @if (rate.IsActive)
+                                            {
+                                                <span class="badge text-bg-success">Active</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge text-bg-secondary">Inactive</span>
+                                            }
+                                        </td>
+                                        <td class="text-end text-nowrap">
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-primary me-1"
+                                                    disabled="@busyKeys.Contains(key)"
+                                                    @onclick="() => Edit(rate)">
+                                                Edit
+                                            </button>
+
+                                            @if (rate.IsActive)
+                                            {
+                                                <button type="button"
+                                                        class="btn btn-sm btn-outline-danger"
+                                                        disabled="@busyKeys.Contains(key)"
+                                                        @onclick="() => SetActiveAsync(rate, false)">
+                                                    @(busyKeys.Contains(key) ? "Updating..." : "Deactivate")
+                                                </button>
+                                            }
+                                            else
+                                            {
+                                                <button type="button"
+                                                        class="btn btn-sm btn-outline-success"
+                                                        disabled="@busyKeys.Contains(key)"
+                                                        @onclick="() => SetActiveAsync(rate, true)">
+                                                    @(busyKeys.Contains(key) ? "Updating..." : "Activate")
+                                                </button>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+
+            <div class="col-xl-3 col-lg-4">
+                <div class="card rate-form-card">
+                    <div class="card-header">@(editing ? "Edit rate" : "Add rate")</div>
+                    <div class="card-body">
+                        <EditForm Model="form" OnValidSubmit="SaveAsync" FormName="rateForm">
+                            <DataAnnotationsValidator />
+                            <ValidationSummary />
+
+                            <div class="mb-3">
+                                <label class="form-label">Case type</label>
+                                <InputSelect class="form-select form-select-sm"
+                                             @bind-Value="form.CaseTypeId"
+                                             disabled="@editing">
+                                    <option value="0">-- select --</option>
+                                    @foreach (var caseType in available)
+                                    {
+                                        <option value="@caseType.CaseTypeId">
+                                            @caseType.CaseTypeCode - @caseType.CaseTypeName
+                                        </option>
+                                    }
+                                </InputSelect>
+                                <ValidationMessage For="() => form.CaseTypeId" />
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Cost</label>
+                                <InputNumber class="form-control form-control-sm" @bind-Value="form.Cost" />
+                                <ValidationMessage For="() => form.Cost" />
+                            </div>
+
+                            <button type="submit" class="btn btn-primary btn-sm" disabled="@saving">
+                                @(saving ? "Saving..." : editing ? "Update" : "Add")
+                            </button>
+
+                            @if (editing)
+                            {
+                                <button type="button"
+                                        class="btn btn-outline-secondary btn-sm ms-2"
+                                        disabled="@saving"
+                                        @onclick="CancelEdit">
+                                    Cancel
+                                </button>
+                            }
+                        </EditForm>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public int DocId { get; set; }
+
+    private Doctor? doctor;
+    private List<DoctorRateListItem>? rates;
+    private List<CaseType> available = [];
+    private RateForm form = new();
+
+    private bool editing;
+    private bool saving;
+    private string? error;
+    private string? successMessage;
+    private readonly HashSet<string> busyKeys = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        doctor = await DoctorService.GetByIdAsync(DocId);
+
+        if (doctor is null)
+        {
+            Nav.NavigateTo("/doctors");
+            return;
+        }
+
+        CancelEdit();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        rates = await RateService.GetForDoctorAsync(DocId, includeInactive: true);
+        available = await RateService.GetAvailableCaseTypesAsync(DocId);
+    }
+
+    private void Edit(DoctorRateListItem rate)
+    {
+        error = null;
+        successMessage = null;
+        editing = true;
+
+        form = new RateForm
+        {
+            CaseTypeId = rate.CaseTypeId,
+            Cost = rate.Cost,
+            IsActive = rate.IsActive
+        };
+
+        if (available.All(x => x.CaseTypeId != rate.CaseTypeId))
+        {
+            available.Add(new CaseType
+            {
+                CaseTypeId = rate.CaseTypeId,
+                CaseTypeCode = rate.CaseTypeCode,
+                CaseTypeName = rate.CaseTypeName,
+                Scope = rate.Scope
+            });
+        }
+    }
+
+    private void CancelEdit()
+    {
+        editing = false;
+        saving = false;
+        form = new RateForm();
+    }
+
+    private async Task SaveAsync()
+    {
+        error = null;
+        successMessage = null;
+        saving = true;
+
+        try
+        {
+            var rate = new DoctorRate
+            {
+                DocId = DocId,
+                CaseTypeId = form.CaseTypeId,
+                Cost = form.Cost,
+                IsActive = editing ? form.IsActive : true
+            };
+
+            if (editing)
+            {
+                await RateService.UpdateAsync(rate);
+                successMessage = "Rate updated successfully.";
+            }
+            else
+            {
+                await RateService.CreateAsync(rate);
+                successMessage = "Rate added successfully.";
+            }
+
+            CancelEdit();
+            await LoadAsync();
+        }
+        catch (DbUpdateException)
+        {
+            error = "This rate already exists or could not be saved.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            error = ex.Message;
+        }
+        catch (Exception)
+        {
+            error = "The rate could not be saved. Please try again.";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task SetActiveAsync(DoctorRateListItem rate, bool isActive)
+    {
+        var key = GetRateKey(rate);
+        error = null;
+        successMessage = null;
+
+        if (!busyKeys.Add(key))
+        {
+            return;
+        }
+
+        try
+        {
+            await RateService.SetActiveAsync(rate.DocId, rate.CaseTypeId, isActive);
+
+            successMessage = isActive
+                ? $"{rate.CaseTypeCode} rate activated successfully."
+                : $"{rate.CaseTypeCode} rate deactivated successfully.";
+
+            if (editing && form.CaseTypeId == rate.CaseTypeId)
+            {
+                CancelEdit();
+            }
+
+            await LoadAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            error = ex.Message;
+        }
+        catch (Exception)
+        {
+            error = "The rate status could not be updated. Please try again.";
+        }
+        finally
+        {
+            busyKeys.Remove(key);
+        }
+    }
+
+    private static string GetRateKey(DoctorRateListItem rate)
+    {
+        return $"{rate.DocId}:{rate.CaseTypeId}";
+    }
+
+    private sealed class RateForm
+    {
+        [Range(1, int.MaxValue, ErrorMessage = "Select a case type.")]
+        public int CaseTypeId { get; set; }
+
+        [Range(typeof(decimal), "0", "999999", ErrorMessage = "Cost must be between 0 and 999999.")]
+        public decimal Cost { get; set; }
+
+        public bool IsActive { get; set; } = true;
+    }
+}

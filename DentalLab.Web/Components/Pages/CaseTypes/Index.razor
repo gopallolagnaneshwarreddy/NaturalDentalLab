@@ -1,0 +1,103 @@
+﻿@page "/case-types"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.CaseTypesManage)]
+@using DentalLab.Application.Abstractions
+@using DentalLab.Domain.Entities
+@using Microsoft.AspNetCore.Authorization
+@inject ICaseTypeService Service
+<PageTitle>Case Types</PageTitle>
+<div class="d-flex justify-content-between mb-3"><h3>Case Types</h3><a class="btn btn-primary" href="/case-types/new">Add case type</a></div>
+<div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="inactive" checked="@showInactive" @onchange="ToggleInactive" /><label class="form-check-label" for="inactive">Show inactive</label></div>
+@if (items is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr>
+                @SortHeader("Order", "Order")
+                @SortHeader("Code", "Code")
+                @SortHeader("Name", "Name")
+                @SortHeader("Scope", "Scope")
+                @SortHeader("Status", "Status")
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var x in items)
+            {
+                <tr class="@(x.IsActive ? "" : "text-muted")">
+                    <td>@x.DisplayOrder</td>
+                    <td><code>@x.CaseTypeCode</code></td>
+                    <td>@x.CaseTypeName</td>
+                    <td>@(x.Scope == 'A' ? "Whole arch" : "Per tooth")</td>
+                    <td>@(x.IsActive ? "Active" : "Inactive")</td>
+                    <td class="text-end">
+                        <a class="btn btn-sm btn-outline-primary me-1" href="@($"/case-types/{x.CaseTypeId}")">Edit</a>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => Toggle(x)">@(x.IsActive ? "Deactivate" : "Reactivate")</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+@code {
+    private List<CaseType>? items;
+    private bool showInactive;
+    private string sortColumn = "Order";
+    private bool sortDescending;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        items = await Service.GetAllAsync(showInactive);
+        ApplySort();
+    }
+
+    private void ApplySort()
+    {
+        if (items is null) return;
+
+        Func<CaseType, object?> keySelector = sortColumn switch
+        {
+            "Code" => x => x.CaseTypeCode,
+            "Name" => x => x.CaseTypeName,
+            "Scope" => x => x.Scope,
+            "Status" => x => x.IsActive,
+            _ => x => x.DisplayOrder
+        };
+
+        items = (sortDescending ? items.OrderByDescending(keySelector) : items.OrderBy(keySelector)).ToList();
+    }
+
+    private void SortBy(string column)
+    {
+        if (sortColumn == column) sortDescending = !sortDescending;
+        else { sortColumn = column; sortDescending = false; }
+        ApplySort();
+    }
+
+    private RenderFragment SortHeader(string column, string label)
+    {
+        var isActive = sortColumn == column;
+        var cssClass = "sortable-th" + (isActive ? " sort-active" : "");
+        var icon = isActive ? (sortDescending ? "\u25bc" : "\u25b2") : "\u2195";
+
+        return @<th class="@cssClass" @onclick="() => SortBy(column)">@label<span class="sort-icon">@icon</span></th>;
+    }
+
+    private async Task ToggleInactive(ChangeEventArgs e)
+    {
+        showInactive = e.Value is bool v && v;
+        await Load();
+    }
+
+    private async Task Toggle(CaseType x)
+    {
+        await Service.SetActiveAsync(x.CaseTypeId, !x.IsActive);
+        await Load();
+    }
+}

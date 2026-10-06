@@ -1,0 +1,27 @@
+.auth-page-wrapper {
+    min-height: 100vh;
+    background: #f7f5f0;
+}
+
+#blazor-error-ui {
+    background: linear-gradient(135deg, #fbeae8 0%, #f6d6d1 100%);
+    border-top: 2px solid #c0362c;
+    bottom: 0;
+    box-shadow: 0 -4px 12px rgba(192, 54, 44, 0.15);
+    box-sizing: border-box;
+    display: none;
+    left: 0;
+    padding: 1rem 1.5rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1001;
+    color: #7c2119;
+    font-weight: 500;
+    font-size: 0.95rem;
+}
+
+#blazor-error-ui::before { content: "⚠️ "; margin-right: 0.5rem; }
+#blazor-error-ui .reload { color: #7c2119; text-decoration: underline; font-weight: 600; cursor: pointer; margin-left: 0.5rem; }
+#blazor-error-ui .reload:hover { text-decoration: none; }
+#blazor-error-ui .dismiss { cursor: pointer; position: absolute; right: 1rem; top: 50%; transform: translateY(-50%); font-size: 1.25rem; }
+#blazor-error-ui .dismiss:hover { opacity: 0.7; }

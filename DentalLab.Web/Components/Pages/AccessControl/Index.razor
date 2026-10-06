@@ -1,0 +1,259 @@
+@page "/access-control"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Owner")]
+
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authorization
+
+@inject PermissionStore Permissions
+
+<PageTitle>Access Control</PageTitle>
+
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+    <div>
+        <h3 class="mb-1">Access Control</h3>
+        <p class="text-muted mb-0">
+            Choose what <strong>Admin</strong> and <strong>Staff</strong> users can do.
+            Changes apply as soon as you save; users see them the next time they open a page.
+            The <strong>Owner</strong> always has full access.
+        </p>
+    </div>
+    @if (lastChangeAt is not null)
+    {
+        <div class="small text-muted text-end">
+            Last changed @lastChangeAt.Value.ToLocalTime().ToString("dd MMM yyyy, hh:mm tt")
+            @if (!string.IsNullOrWhiteSpace(lastChangeBy))
+            {
+                <br /><span>by @lastChangeBy</span>
+            }
+        </div>
+    }
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Permissions.LastError))
+{
+    <div class="alert alert-warning">
+        <strong>Database problem:</strong> @Permissions.LastError
+        <div class="small">Until this is fixed the app uses the default permissions shown below.</div>
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <div class="alert @(messageIsError ? "alert-danger" : "alert-success") alert-dismissible">
+        @message
+        <button type="button" class="btn-close" aria-label="Close" @onclick="() => message = null"></button>
+    </div>
+}
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table align-middle mb-0 access-table">
+            <thead>
+                <tr>
+                    <th>Permission</th>
+                    @foreach (var role in PermissionCatalog.ConfigurableRoles)
+                    {
+                        var r = role;
+                        <th class="text-center role-col">
+                            <div>@r</div>
+                            <div class="btn-group btn-group-sm mt-1">
+                                <button type="button" class="btn btn-outline-secondary py-0 px-2" title="Allow everything for @r" @onclick="() => SetAll(r, true)">All</button>
+                                <button type="button" class="btn btn-outline-secondary py-0 px-2" title="Remove everything for @r" @onclick="() => SetAll(r, false)">None</button>
+                            </div>
+                        </th>
+                    }
+                    <th class="text-center role-col text-muted">Owner</th>
+                </tr>
+            </thead>
+
+            @foreach (var group in PermissionCatalog.All.GroupBy(p => p.Group))
+            {
+                <tbody>
+                    <tr class="group-row">
+                        <td colspan="@(PermissionCatalog.ConfigurableRoles.Length + 2)">@group.Key</td>
+                    </tr>
+
+                    @foreach (var definition in group)
+                    {
+                        var d = definition;
+                        <tr>
+                            <td>
+                                <div class="fw-semibold">@d.Name</div>
+                                <div class="small text-muted">@d.Description</div>
+                            </td>
+
+                            @foreach (var role in PermissionCatalog.ConfigurableRoles)
+                            {
+                                var r = role;
+                                var allowed = draft[(r, d.Key)];
+                                var changed = allowed != original[(r, d.Key)];
+                                var isDefault = allowed == PermissionCatalog.DefaultFor(r, d);
+
+                                <td class="text-center @(changed ? "cell-changed" : "")">
+                                    <div class="form-check form-switch d-inline-block m-0">
+                                        <input class="form-check-input"
+                                               type="checkbox"
+                                               role="switch"
+                                               id="@($"perm-{r}-{d.Key}")"
+                                               checked="@allowed"
+                                               disabled="@saving"
+                                               aria-label="@($"{d.Name} for {r}")"
+                                               @onchange="e => Toggle(r, d.Key, e)" />
+                                    </div>
+                                    @if (!isDefault)
+                                    {
+                                        <div class="tiny text-muted">changed from default</div>
+                                    }
+                                </td>
+                            }
+
+                            <td class="text-center text-muted" title="The Owner always has full access">&#10003;</td>
+                        </tr>
+                    }
+                </tbody>
+            }
+        </table>
+    </div>
+
+    <div class="card-footer d-flex flex-wrap gap-2 align-items-center">
+        <button type="button" class="btn btn-primary" disabled="@(saving || PendingCount == 0)" @onclick="SaveAsync">
+            @(saving ? "Saving..." : PendingCount == 0 ? "No changes" : $"Save {PendingCount} change(s)")
+        </button>
+        <button type="button" class="btn btn-outline-secondary" disabled="@(saving || PendingCount == 0)" @onclick="Undo">
+            Undo changes
+        </button>
+
+        <div class="ms-auto">
+            @if (!confirmReset)
+            {
+                <button type="button" class="btn btn-link text-danger" disabled="@saving" @onclick="() => confirmReset = true">
+                    Reset all to defaults
+                </button>
+            }
+            else
+            {
+                <span class="small me-2">Put every switch back to the original setup?</span>
+                <button type="button" class="btn btn-sm btn-danger" disabled="@saving" @onclick="ResetAsync">Yes, reset</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@saving" @onclick="() => confirmReset = false">No</button>
+            }
+        </div>
+    </div>
+</div>
+
+<div class="small text-muted mt-3">
+    Notes: "See prices" also hides rates and amounts inside case entry.
+    "Quick-add" switches control the <em>+ Add</em> options shown while typing a doctor or picking a case type.
+    Approval reviews and the dashboard's own figures still follow each user's role.
+</div>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+
+    // (Role, Key) -> allowed
+    private Dictionary<(string, string), bool> original = new();
+    private Dictionary<(string, string), bool> draft = new();
+
+    private bool saving;
+    private bool confirmReset;
+    private string? message;
+    private bool messageIsError;
+    private DateTime? lastChangeAt;
+    private string? lastChangeBy;
+
+    private int PendingCount => draft.Count(kv => original[kv.Key] != kv.Value);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Permissions.EnsureFreshAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        original = new();
+        foreach (var role in PermissionCatalog.ConfigurableRoles)
+        {
+            foreach (var definition in PermissionCatalog.All)
+            {
+                original[(role, definition.Key)] = Permissions.IsAllowedForRole(role, definition);
+            }
+        }
+
+        draft = new(original);
+        (lastChangeAt, lastChangeBy) = await Permissions.GetLastChangeAsync();
+    }
+
+    private void Toggle(string role, string key, ChangeEventArgs e)
+    {
+        draft[(role, key)] = e.Value is bool value && value;
+        message = null;
+    }
+
+    private void SetAll(string role, bool allowed)
+    {
+        foreach (var definition in PermissionCatalog.All)
+        {
+            draft[(role, definition.Key)] = allowed;
+        }
+
+        message = null;
+    }
+
+    private void Undo()
+    {
+        draft = new(original);
+        message = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        saving = true;
+        message = null;
+        try
+        {
+            var user = (await AuthenticationStateTask).User;
+            var by = user.FindFirstValue(ClaimTypes.Email) ?? user.Identity?.Name ?? "Owner";
+            var count = PendingCount;
+
+            await Permissions.SaveAsync(draft, by);
+            await LoadAsync();
+
+            message = $"Saved {count} change(s). They apply from the next page each user opens.";
+            messageIsError = false;
+        }
+        catch (Exception exception)
+        {
+            message = "Could not save: " + exception.Message;
+            messageIsError = true;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task ResetAsync()
+    {
+        saving = true;
+        confirmReset = false;
+        message = null;
+        try
+        {
+            await Permissions.ResetToDefaultsAsync();
+            await LoadAsync();
+            message = "All permissions are back to their defaults.";
+            messageIsError = false;
+        }
+        catch (Exception exception)
+        {
+            message = "Could not reset: " + exception.Message;
+            messageIsError = true;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+}

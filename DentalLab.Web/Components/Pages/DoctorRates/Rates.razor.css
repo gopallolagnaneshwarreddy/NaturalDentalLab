@@ -1,0 +1,68 @@
+.rate-page {
+    width: 100%;
+    min-width: 0;
+}
+
+.rate-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.rate-heading h3 {
+    font-size: 1.65rem;
+}
+
+.rate-table-wrapper {
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+}
+
+.rate-table {
+    min-width: 720px;
+    margin-bottom: 0;
+    font-size: 0.82rem;
+}
+
+.rate-table > :not(caption) > * > * {
+    padding: 0.42rem 0.5rem;
+}
+
+.rate-table thead th {
+    font-size: 0.76rem;
+    white-space: nowrap;
+    background-color: #f8f9fa;
+}
+
+.rate-table code {
+    font-size: 0.78rem;
+}
+
+.inactive-rate {
+    color: #6c757d;
+    background-color: #f8f9fa;
+}
+
+.rate-form-card .card-header {
+    padding: 0.55rem 0.75rem;
+    font-weight: 600;
+}
+
+.rate-form-card .card-body {
+    padding: 0.75rem;
+}
+
+.rate-form-card .form-label {
+    margin-bottom: 0.25rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.rate-form-card .validation-message {
+    display: block;
+    margin-top: 0.2rem;
+    color: #dc3545;
+    font-size: 0.72rem;
+}

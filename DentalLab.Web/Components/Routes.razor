@@ -1,0 +1,23 @@
+﻿@using DentalLab.Web.Components.Account.Shared
+<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+            <NotAuthorized>
+                @if (context.User.Identity?.IsAuthenticated == true)
+                {
+                    @* Signed in, but Access Control does not allow this page for their role *@
+                    <div class="alert alert-warning m-4">
+                        <h5 class="mb-1">No access</h5>
+                        <div>You don't have permission to open this page. Ask the owner if you need access.</div>
+                        <a class="btn btn-sm btn-outline-secondary mt-3" href="/">Go to home</a>
+                    </div>
+                }
+                else
+                {
+                    <RedirectToLogin />
+                }
+            </NotAuthorized>
+        </AuthorizeRouteView>
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>

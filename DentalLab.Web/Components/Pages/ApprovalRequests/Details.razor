@@ -1,0 +1,108 @@
+﻿@page "/approval-requests/{RequestId:long}"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.ApprovalsView)]
+@using System.Security.Claims
+@using DentalLab.Application.Abstractions
+@using DentalLab.Application.Models.Approvals
+@using DentalLab.Application.Security
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@inject ICaseApprovalService ApprovalService
+@inject NavigationManager Nav
+<PageTitle>Approval Request</PageTitle>
+
+@if (loading) { <p>Loading...</p> }
+else if (item is null) { <div class="alert alert-warning">Request not found or access denied.</div> }
+else
+{
+    <div class="d-flex justify-content-between align-items-start mb-3">
+        <div><h3>Approval Request #@item.RequestId</h3><span class="badge @StatusClass(item.Status)">@item.Status</span></div>
+        <div><a class="btn btn-outline-secondary" href="/approval-requests">Back</a><a class="btn btn-outline-primary ms-2" href="@($"/cases/{item.CaseId}")">View Case</a></div>
+    </div>
+    @if (item.Status == CaseApprovalRequestStatuses.Approved)
+    {
+        <div class="alert alert-primary"><strong>Approved, action pending.</strong> This request remains active and blocks any new request for Case #@item.CaseId until the approved action is completed.</div>
+    }
+    <div class="card mb-3"><div class="card-body row g-3">
+        <div class="col-md-3"><b>Case</b><br />#@item.CaseId</div><div class="col-md-3"><b>Type</b><br />@item.RequestType</div>
+        <div class="col-md-3"><b>Requested By</b><br />@item.RequestedByEmail</div><div class="col-md-3"><b>Assigned Admin</b><br />@item.AssignedAdminEmail</div>
+        <div class="col-12"><b>Reason</b><br />@item.Reason</div>
+        @if (!string.IsNullOrWhiteSpace(item.AdditionalDetails)) { <div class="col-12"><b>Additional Details</b><br />@item.AdditionalDetails</div> }
+        @if (!string.IsNullOrWhiteSpace(item.ReviewComment)) { <div class="col-12"><b>Review</b><br />@item.ReviewComment</div> }
+    </div></div>
+
+    @if (CanReview && item.Status == CaseApprovalRequestStatuses.Pending)
+    {
+        <EditForm Model="review" FormName="reviewApprovalForm"><DataAnnotationsValidator />
+            <div class="card"><div class="card-body">
+                <label class="form-label">Review comment</label><InputTextArea class="form-control" rows="3" @bind-Value="review.Comment" /><ValidationMessage For="() => review.Comment" />
+                @if (!string.IsNullOrWhiteSpace(error)) { <div class="alert alert-danger mt-3">@error</div> }
+                <div class="mt-3">
+                    @if (item.RequestType == CaseApprovalRequestTypes.Edit) { <button type="button" class="btn btn-primary" disabled="@saving" @onclick="ApproveEditAsync">Approve & Edit</button> }
+                    else { <button type="button" class="btn btn-danger" disabled="@saving" @onclick="ApproveCancelAsync">Approve Cancellation</button> }
+                    <button type="button" class="btn btn-outline-danger ms-2" disabled="@saving" @onclick="RejectAsync">Reject</button>
+                </div>
+            </div></div>
+        </EditForm>
+    }
+    else if (CanReview && item.Status == CaseApprovalRequestStatuses.Approved)
+    {
+        @if (!string.IsNullOrWhiteSpace(error)) { <div class="alert alert-danger">@error</div> }
+        @if (item.RequestType == CaseApprovalRequestTypes.Edit)
+        {
+            <a class="btn btn-primary" href="@($"/cases/{item.CaseId}/edit?requestId={item.RequestId}")">Continue Approved Edit</a>
+        }
+        else
+        {
+            <button type="button" class="btn btn-danger" disabled="@saving" @onclick="ResumeCancellationAsync">Retry Approved Cancellation</button>
+        }
+    }
+}
+
+@code {
+    [Parameter] public long RequestId { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+    private CaseApprovalDetails? item; private readonly ReviewCaseApprovalRequest review = new();
+    private string currentUserId = string.Empty, currentEmail = string.Empty; private bool isOwner, loading = true, saving; private string? error;
+    private bool CanReview => item is not null && (isOwner || item.AssignedAdminUserId == currentUserId);
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+    private async Task LoadAsync()
+    {
+        var state = await AuthenticationStateTask;
+        currentUserId = state.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
+        currentEmail = state.User.FindFirstValue(ClaimTypes.Email) ?? state.User.Identity?.Name ?? string.Empty;
+        isOwner = state.User.IsInRole(ApplicationRoles.Owner);
+        item = await ApprovalService.GetByIdAsync(RequestId, currentUserId, isOwner); loading = false;
+    }
+    private async Task ApproveEditAsync()
+    {
+        if (!ValidateComment()) return; saving = true;
+        var result = await ApprovalService.ApproveAsync(RequestId, review.Comment, item!.RowVersion, currentUserId, currentEmail, isOwner); saving = false;
+        if (!result.Succeeded) { error = result.ErrorMessage; return; }
+        Nav.NavigateTo($"/cases/{item.CaseId}/edit?requestId={RequestId}");
+    }
+    private async Task ApproveCancelAsync()
+    {
+        if (!ValidateComment()) return; saving = true;
+        var result = await ApprovalService.ApproveAndCancelAsync(RequestId, review.Comment, item!.RowVersion, currentUserId, currentEmail, isOwner); saving = false;
+        if (!result.Succeeded) { error = result.ErrorMessage; await LoadAsync(); return; }
+        Nav.NavigateTo($"/approval-requests/{RequestId}", forceLoad: true);
+    }
+    private async Task ResumeCancellationAsync()
+    {
+        saving = true; error = null;
+        var result = await ApprovalService.ResumeCancellationAsync(RequestId, currentUserId, currentEmail, isOwner); saving = false;
+        if (!result.Succeeded) { error = result.ErrorMessage; return; }
+        Nav.NavigateTo($"/approval-requests/{RequestId}", forceLoad: true);
+    }
+    private async Task RejectAsync()
+    {
+        if (!ValidateComment()) return; saving = true;
+        var result = await ApprovalService.RejectAsync(RequestId, review.Comment, item!.RowVersion, currentUserId, currentEmail, isOwner); saving = false;
+        if (!result.Succeeded) { error = result.ErrorMessage; return; }
+        Nav.NavigateTo($"/approval-requests/{RequestId}", forceLoad: true);
+    }
+    private bool ValidateComment() { error = string.IsNullOrWhiteSpace(review.Comment) ? "Review comment is required." : null; return error is null; }
+    private static string StatusClass(string status) => status switch { "Pending" => "text-bg-warning", "Approved" => "text-bg-primary", "Completed" => "text-bg-success", "Rejected" => "text-bg-danger", _ => "text-bg-secondary" };
+}

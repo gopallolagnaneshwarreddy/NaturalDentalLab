@@ -1,0 +1,1 @@
+.compact-grid{display:grid;grid-template-columns:1fr 1fr;width:180px;font-family:monospace}.compact-grid>div{min-height:22px;padding:3px 8px}.right{text-align:right;border-right:1.5px solid}.left{text-align:left}.top{border-bottom:1.5px solid}.arch-value{width:180px;text-align:center;font-weight:600;font-size:.82rem}

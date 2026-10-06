@@ -1,0 +1,509 @@
+@page "/reports/monthly"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.ReportsMonthly)]
+
+@using System.Globalization
+@using System.Security.Claims
+@using DentalLab.Application.Abstractions
+@using DentalLab.Application.Models.Cases
+@using Microsoft.AspNetCore.Authorization
+@using DentalLab.Web.Reports
+@using DentalLab.Web.Pdf
+
+@inject ICaseService CaseService
+@inject PermissionStore Permissions
+@inject IJSRuntime JS
+
+<PageTitle>Monthly Summary – @MonthLabel</PageTitle>
+
+<div class="ms-page">
+    @* ---------------- Controls (not printed) ---------------- *@
+    <div class="ms-controls no-print">
+        <div>
+            <h3 class="mb-1">Monthly Summary</h3>
+            <p class="text-muted mb-0">Pick a month to see production, case types and doctors. Print it or save it as PDF.</p>
+        </div>
+
+        <div class="ms-pickers">
+            <div>
+                <label class="form-label" for="msMonth">Month</label>
+                <select id="msMonth" class="form-select" value="@month" @onchange="MonthChangedAsync" disabled="@loading">
+                    @for (var m = 1; m <= 12; m++)
+                    {
+                        var value = m;
+                        <option value="@value" disabled="@(year == DateTime.Today.Year && value > DateTime.Today.Month)">
+                            @CultureInfo.InvariantCulture.DateTimeFormat.GetMonthName(value)
+                        </option>
+                    }
+                </select>
+            </div>
+            <div>
+                <label class="form-label" for="msYear">Year</label>
+                <select id="msYear" class="form-select" value="@year" @onchange="YearChangedAsync" disabled="@loading">
+                    @for (var y = DateTime.Today.Year; y >= FirstYear; y--)
+                    {
+                        var value = y;
+                        <option value="@value">@value</option>
+                    }
+                </select>
+            </div>
+            <div class="ms-actions">
+                <button type="button" class="btn btn-outline-primary" disabled="@(loading || report is null)" @onclick="PrintAsync">Print</button>
+                <button type="button" class="btn btn-primary" disabled="@(loading || downloading || report is null)" @onclick="DownloadAsync">
+                    @(downloading ? "Preparing PDF..." : "Download PDF")
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (downloadError is not null)
+    {
+        <div class="alert alert-warning no-print">@downloadError</div>
+    }
+
+    @if (loading)
+    {
+        <div class="ms-loading no-print">
+            <div class="spinner-border spinner-border-sm" role="status" aria-label="Loading"></div>
+            <span>Preparing the @MonthLabel summary...</span>
+        </div>
+    }
+    else if (error is not null)
+    {
+        <div class="alert alert-danger no-print">@error</div>
+    }
+    else if (report is not null)
+    {
+        var r = report;
+
+        <article class="ms-sheet">
+            @* ---------------- Letterhead ---------------- *@
+            <header class="ms-head">
+                <div class="ms-brand">
+                    <img src="/images/logo.png" alt="" class="ms-logo" />
+                    <div>
+                        <div class="ms-lab">Natural Dental Labs</div>
+                        <h1 class="ms-title">Monthly Production Summary</h1>
+                        <div class="ms-period">@MonthLabel &middot; @r.From.ToString("dd MMM") – @r.To.ToString("dd MMM yyyy")</div>
+                    </div>
+                </div>
+                <div class="ms-meta">
+                    <div><span>Generated</span><strong>@generatedAt.ToString("dd MMM yyyy, hh:mm tt")</strong></div>
+                    <div><span>Prepared by</span><strong>@preparedBy</strong></div>
+                    <div><span>Compared with</span><strong>@r.PrevLabel</strong></div>
+                </div>
+            </header>
+
+            @if (r.Cases == 0)
+            {
+                <div class="ms-empty">
+                    <strong>No active cases in @MonthLabel.</strong>
+                    <span>Choose another month above.</span>
+                </div>
+            }
+            else
+            {
+                @* ---------------- KPI strip ---------------- *@
+                <section class="ms-kpis">
+                    <div class="ms-kpi">
+                        <span class="ms-kpi-label">Cases</span>
+                        <strong class="ms-kpi-value">@r.Cases.ToString("N0")</strong>
+                        @Delta(r.Cases, r.PrevCases)
+                    </div>
+                    <div class="ms-kpi">
+                        <span class="ms-kpi-label">Units</span>
+                        <strong class="ms-kpi-value">@r.Units.ToString("N0")</strong>
+                        @Delta(r.Units, r.PrevUnits)
+                    </div>
+                    @if (canSeePrices)
+                    {
+                        <div class="ms-kpi ms-kpi-main">
+                            <span class="ms-kpi-label">Production value</span>
+                            <strong class="ms-kpi-value">@Money(r.Amount)</strong>
+                            @Delta(r.Amount, r.PrevAmount)
+                        </div>
+                    }
+                    <div class="ms-kpi">
+                        <span class="ms-kpi-label">Doctors</span>
+                        <strong class="ms-kpi-value">@r.Doctors</strong>
+                        @Delta(r.Doctors, r.PrevDoctors)
+                    </div>
+                    <div class="ms-kpi">
+                        <span class="ms-kpi-label">Units per case</span>
+                        <strong class="ms-kpi-value">@r.UnitsPerCase.ToString("0.0")</strong>
+                        <span class="ms-kpi-sub">@r.PatientsCount patients</span>
+                    </div>
+                    @if (canSeePrices)
+                    {
+                        <div class="ms-kpi">
+                            <span class="ms-kpi-label">Value per case</span>
+                            <strong class="ms-kpi-value">@Money(r.AmountPerCase, 0)</strong>
+                            <span class="ms-kpi-sub">@Money(r.AmountPerUnit, 0) per unit</span>
+                        </div>
+                    }
+                </section>
+
+                @* ---------------- Highlights ---------------- *@
+                <section class="ms-highlights">
+                    <div><span>Top doctor</span><strong>@r.TopDoctor</strong></div>
+                    <div><span>Top case type</span><strong>@r.TopType</strong></div>
+                    <div><span>Busiest day</span><strong>@r.BusiestDay</strong></div>
+                    <div><span>Working days with cases</span><strong>@r.ActiveDays of @r.DaysInMonth</strong></div>
+                    <div><span>Doctors new vs last month</span><strong>@r.NewDoctors</strong></div>
+                    <div><span>Cancelled this month</span><strong>@r.Cancelled</strong></div>
+                </section>
+
+                @* ---------------- Unit basis split ---------------- *@
+                <section class="ms-block">
+                    <h2>Units by charging basis</h2>
+                    <div class="ms-split">
+                        <div class="ms-split-bar" role="img" aria-label="@($"{r.ToothUnits} tooth units, {r.ArchUnits} arch units")">
+                            <span class="ms-split-tooth" style="width:@Pct(r.ToothUnits, r.Units)%"></span>
+                            <span class="ms-split-arch" style="width:@Pct(r.ArchUnits, r.Units)%"></span>
+                        </div>
+                        <div class="ms-split-legend">
+                            <div><i class="dot dot-tooth"></i>Per tooth <strong>@r.ToothUnits.ToString("N0")</strong> units (@Pct(r.ToothUnits, r.Units)%)
+                                @if (canSeePrices) {<span class="text-muted"> &middot; @Money(r.ToothAmount)</span>}</div>
+                            <div><i class="dot dot-arch"></i>Per arch <strong>@r.ArchUnits.ToString("N0")</strong> units (@Pct(r.ArchUnits, r.Units)%)
+                                @if (canSeePrices) {<span class="text-muted"> &middot; @Money(r.ArchAmount)</span>}</div>
+                        </div>
+                    </div>
+                </section>
+
+                @* ---------------- Case types ---------------- *@
+                <section class="ms-block">
+                    <h2>Case types</h2>
+                    <table class="ms-table">
+                        <thead>
+                            <tr>
+                                <th>Code</th>
+                                <th>Case type</th>
+                                <th>Basis</th>
+                                <th class="num">Cases</th>
+                                <th class="num">Units</th>
+                                @if (canSeePrices)
+                                {
+                                    <th class="num">Avg rate</th>
+                                    <th class="num">Amount</th>
+                                }
+                                <th class="share">Share</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var t in r.Types)
+                            {
+                                var share = canSeePrices ? Pct(t.Amount, r.Amount) : Pct(t.Units, r.Units);
+                                <tr>
+                                    <td><strong>@t.Code</strong></td>
+                                    <td>@t.Name</td>
+                                    <td>@(t.Scope == 'A' ? "Arch" : "Tooth")</td>
+                                    <td class="num">@t.Cases</td>
+                                    <td class="num">@t.Units</td>
+                                    @if (canSeePrices)
+                                    {
+                                        <td class="num">@Money(t.Units == 0 ? 0 : t.Amount / t.Units)</td>
+                                        <td class="num">@Money(t.Amount)</td>
+                                    }
+                                    <td class="share"><span class="ms-bar"><i style="width:@share%"></i></span><span>@share%</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td colspan="3">Total (@r.Types.Count types)</td>
+                                <td class="num">@r.Cases</td>
+                                <td class="num">@r.Units</td>
+                                @if (canSeePrices)
+                                {
+                                    <td class="num">@Money(r.AmountPerUnit)</td>
+                                    <td class="num">@Money(r.Amount)</td>
+                                }
+                                <td class="share">100%</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                    <p class="ms-note">"Cases" counts cases that contain the type; one case can contain several types.</p>
+                </section>
+
+                @* ---------------- Doctors ---------------- *@
+                <section class="ms-block">
+                    <h2>Doctors</h2>
+                    <table class="ms-table">
+                        <thead>
+                            <tr>
+                                <th class="num">#</th>
+                                <th>Doctor</th>
+                                <th class="num">Cases</th>
+                                <th class="num">Units</th>
+                                @if (canSeePrices)
+                                {
+                                    <th class="num">Amount</th>
+                                }
+                                <th>Main case type</th>
+                                <th class="num">vs last month</th>
+                                <th class="share">Share</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (var i = 0; i < r.DoctorRows.Count; i++)
+                            {
+                                var d = r.DoctorRows[i];
+                                var share = canSeePrices ? Pct(d.Amount, r.Amount) : Pct(d.Units, r.Units);
+                                <tr>
+                                    <td class="num">@(i + 1)</td>
+                                    <td><strong>@d.Name</strong></td>
+                                    <td class="num">@d.Cases</td>
+                                    <td class="num">@d.Units</td>
+                                    @if (canSeePrices)
+                                    {
+                                        <td class="num">@Money(d.Amount)</td>
+                                    }
+                                    <td>@d.TopType</td>
+                                    <td class="num">@Delta(canSeePrices ? d.Amount : d.Units, canSeePrices ? d.PrevAmount : d.PrevUnits)</td>
+                                    <td class="share"><span class="ms-bar"><i style="width:@share%"></i></span><span>@share%</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td></td>
+                                <td>Total (@r.Doctors doctors)</td>
+                                <td class="num">@r.Cases</td>
+                                <td class="num">@r.Units</td>
+                                @if (canSeePrices)
+                                {
+                                    <td class="num">@Money(r.Amount)</td>
+                                }
+                                <td></td>
+                                <td class="num">@Delta(canSeePrices ? r.Amount : r.Units, canSeePrices ? r.PrevAmount : r.PrevUnits)</td>
+                                <td class="share">100%</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </section>
+
+                @* ---------------- Daily activity ---------------- *@
+                <section class="ms-block ms-keep">
+                    <h2>Daily activity <small>units received per day</small></h2>
+                    <div class="ms-days" role="img" aria-label="Units per day">
+                        @foreach (var day in r.Days)
+                        {
+                            <div class="ms-day @(day.IsSunday ? "sun" : "")" title="@($"{day.Date:dd MMM}: {day.Cases} cases, {day.Units} units")">
+                                <span class="ms-day-val">@(day.Units > 0 ? day.Units.ToString() : "")</span>
+                                <span class="ms-day-bar" style="height:@(r.MaxDayUnits == 0 ? 0 : Math.Max(day.Units > 0 ? 4 : 0, day.Units * 100 / r.MaxDayUnits))%"></span>
+                                <span class="ms-day-num">@day.Date.Day</span>
+                            </div>
+                        }
+                    </div>
+                    <p class="ms-note">Shaded columns are Sundays. Weekly totals:
+                        @foreach (var w in r.Weeks)
+                        {
+                            <span class="ms-week">@w.Label: <strong>@w.Units</strong> units / @w.Cases cases</span>
+                        }
+                    </p>
+                </section>
+
+                @* ---------------- Entered by ---------------- *@
+                @if (r.EnteredBy.Count > 0)
+                {
+                    <section class="ms-block ms-keep">
+                        <h2>Cases entered by</h2>
+                        <table class="ms-table ms-table-compact">
+                            <thead>
+                                <tr><th>User</th><th class="num">Cases</th><th class="num">Units</th><th class="share">Share</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var u in r.EnteredBy)
+                                {
+                                    var share = Pct(u.Cases, r.Cases);
+                                    <tr>
+                                        <td>@u.Name</td>
+                                        <td class="num">@u.Cases</td>
+                                        <td class="num">@u.Units</td>
+                                        <td class="share"><span class="ms-bar"><i style="width:@share%"></i></span><span>@share%</span></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </section>
+                }
+            }
+
+            <footer class="ms-foot">
+                <span>Natural Dental Labs &middot; Monthly Production Summary &middot; @MonthLabel</span>
+                <span>Active cases only; cancelled cases are excluded from all totals.</span>
+            </footer>
+        </article>
+    }
+</div>
+
+@code {
+    private const int FirstYear = 2024;
+
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+
+    private int year = DateTime.Today.Year;
+    private int month = DateTime.Today.Month;
+    private bool loading;
+    private string? error;
+    private bool canSeePrices;
+    private string preparedBy = "-";
+    private DateTime generatedAt;
+    private MonthlySummaryReport? report;
+
+    private string MonthLabel =>
+        new DateTime(year, month, 1).ToString("MMMM yyyy", CultureInfo.InvariantCulture);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthenticationStateTask).User;
+        canSeePrices = Permissions.IsAllowed(user, Perm.CasesViewPrices);
+        preparedBy = user.FindFirstValue(ClaimTypes.Email) ?? user.Identity?.Name ?? "-";
+        await LoadAsync();
+    }
+
+    private async Task MonthChangedAsync(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var m)) { month = m; }
+        await LoadAsync();
+    }
+
+    private async Task YearChangedAsync(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var y)) { year = y; }
+        if (year == DateTime.Today.Year && month > DateTime.Today.Month) { month = DateTime.Today.Month; }
+        await LoadAsync();
+    }
+
+    // ------------------------------------------------------------------ data
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        report = null;
+        StateHasChanged();
+
+        try
+        {
+            var from = new DateOnly(year, month, 1);
+            var to = from.AddMonths(1).AddDays(-1);
+            var prevFrom = from.AddMonths(-1);
+            var prevTo = from.AddDays(-1);
+
+            var current = await FetchAsync(from, to, "Active");
+            var previous = await FetchAsync(prevFrom, prevTo, "Active");
+            var cancelled = await FetchAsync(from, to, "Cancelled");
+
+            report = MonthlySummaryReport.Build(from, to, current, previous, cancelled.Count);
+            generatedAt = DateTime.Now;
+        }
+        catch (Exception)
+        {
+            error = "The summary could not be prepared. Please try again.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task<List<CaseListItem>> FetchAsync(DateOnly from, DateOnly to, string status)
+    {
+        var filter = new CaseFilter
+        {
+            FromDate = from,
+            ToDate = to,
+            Status = status,
+            PageNumber = 1,
+            PageSize = 200
+        };
+
+        var all = new List<CaseListItem>();
+        while (true)
+        {
+            var page = await CaseService.SearchAsync(filter);
+            all.AddRange(page.Items);
+            if (!page.HasNextPage || filter.PageNumber >= 500) { break; }
+            filter.PageNumber++;
+        }
+
+        // Safety: keep only what really belongs to the range / status.
+        return all
+            .Where(c => c.CaseDate >= from && c.CaseDate <= to)
+            .Where(c => status == "Cancelled" ? c.IsCancelled : !c.IsCancelled)
+            .GroupBy(c => c.CaseId).Select(g => g.First())
+            .ToList();
+    }
+
+    // ------------------------------------------------------------------ print / pdf
+
+    private async Task PrintAsync() => await JS.InvokeVoidAsync("print");
+
+    private bool downloading;
+    private string? downloadError;
+
+    /// <summary>Builds a real PDF on the server and saves it straight to Downloads.</summary>
+    private async Task DownloadAsync()
+    {
+        if (report is null || downloading)
+        {
+            return;
+        }
+
+        downloading = true;
+        downloadError = null;
+        try
+        {
+            var current = report;
+            var label = MonthLabel;
+            var bytes = await Task.Run(() => MonthlySummaryPdf.Generate(current, label, preparedBy, generatedAt, canSeePrices));
+
+            var fileName = $"MonthlySummary_{new DateTime(year, month, 1):MMMyyyy}.pdf";
+            using var stream = new MemoryStream(bytes);
+            using var streamRef = new DotNetStreamReference(stream);
+            await JS.InvokeVoidAsync("downloadFileFromStream", fileName, streamRef, "application/pdf");
+        }
+        catch (Exception)
+        {
+            downloadError = "The PDF could not be created. Please try again, or use Print and choose Save as PDF.";
+        }
+        finally
+        {
+            downloading = false;
+        }
+    }
+
+    // ------------------------------------------------------------------ helpers
+
+    private static string Money(decimal value, int decimals = 2) =>
+        "\u20b9" + value.ToString(decimals == 0 ? "N0" : "N2", CultureInfo.GetCultureInfo("en-IN"));
+
+    private static int Pct(decimal part, decimal total) =>
+        total <= 0 ? 0 : (int)Math.Round(part * 100m / total, MidpointRounding.AwayFromZero);
+
+    private static RenderFragment Delta(decimal current, decimal previous) => builder =>
+    {
+        string text;
+        string css;
+        if (previous == 0)
+        {
+            text = current == 0 ? "no change" : "new this month";
+            css = "flat";
+        }
+        else
+        {
+            var change = (current - previous) * 100m / previous;
+            var rounded = Math.Round(change, 1);
+            text = rounded == 0 ? "same as last month" : $"{(rounded > 0 ? "▲" : "▼")} {Math.Abs(rounded):0.#}% vs last month";
+            css = rounded > 0 ? "up" : rounded < 0 ? "down" : "flat";
+        }
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"ms-delta {css}");
+        builder.AddContent(2, text);
+        builder.CloseElement();
+    };
+
+}

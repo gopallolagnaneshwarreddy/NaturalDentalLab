@@ -1,0 +1,75 @@
+﻿@page "/cases/{CaseId:int}"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.CasesView)]
+@using DentalLab.Application.Abstractions
+@using DentalLab.Application.Models.Cases
+@using DentalLab.Web.Components.Shared
+@using Microsoft.AspNetCore.Authorization
+@inject PermissionStore Permissions
+@inject ICaseService CaseService
+<PageTitle>Case @CaseId</PageTitle>
+@if (item is null)
+{
+    <p>Loading or case not found...</p>
+}
+else
+{
+    <div class="d-flex justify-content-between">
+        <h3>Case @item.CaseId</h3>
+        <div>
+            <a class="btn btn-outline-secondary" href="/cases">Back</a>
+            @if (!item.IsCancelled)
+            {
+                @if (canEdit)
+                {
+                    <a class="btn btn-outline-primary ms-2" href="@($"/cases/{CaseId}/edit")">Edit</a>
+                }
+                @if (canCancel)
+                {
+                    <a class="btn btn-outline-danger ms-2" href="@($"/cases/{CaseId}/cancel")">Cancel</a>
+                }
+                @if (canRequest && !canEdit)
+                {
+                    <a class="btn btn-outline-primary ms-2" href="@($"/cases/{CaseId}/request-change/edit")">Request Edit</a>
+                }
+                @if (canRequest && !canCancel)
+                {
+                    <a class="btn btn-outline-danger ms-2" href="@($"/cases/{CaseId}/request-change/cancel")">Request Cancellation</a>
+                }
+            }
+        </div>
+    </div>
+    @if (item.IsCancelled) { <div class="alert alert-secondary">Cancelled: @item.CancelReason</div> }
+    <div class="card mb-3"><div class="card-body row">
+        <div class="col"><b>Doctor</b><br />@item.DoctorName</div>
+        <div class="col"><b>Patient</b><br />@item.PatientName</div>
+        <div class="col"><b>Created</b><br />@item.CreatedBy<br />@item.CreatedAt.ToLocalTime()</div>
+        <div class="col"><b>Modified</b><br />@(item.ModifiedBy ?? "-")<br />@item.ModifiedAt?.ToLocalTime()</div>
+    </div></div>
+    <table class="table table-bordered"><thead><tr><th>#</th><th>Teeth</th><th>Type</th>@if (canSeePrices) {<th>Rate</th>}<th>Units</th>@if (canSeePrices) {<th>Amount</th>}</tr></thead><tbody>
+        @foreach (var l in item.Lines)
+        {
+            <tr><td>@l.LineNumber</td><td><CompactToothGrid Scope="@l.Scope" Arch="@l.Arch" UR="@l.UR" UL="@l.UL" LR="@l.LR" LL="@l.LL" /></td><td>@l.CaseTypeCode - @l.CaseTypeName</td>@if (canSeePrices) {<td>@l.UnitRate.ToString("N2")</td>}<td>@l.Units</td>@if (canSeePrices) {<td>@l.Amount.ToString("N2")</td>}</tr>
+        }
+    </tbody></table>
+}
+@code {
+    [Parameter] public int CaseId { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+    private CaseDetails? item;
+    private bool canSeePrices;
+    private bool canEdit;
+    private bool canCancel;
+    private bool canRequest;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // What this user may see / do comes from Access Control (Owner always: everything)
+        var user = (await AuthenticationStateTask).User;
+        canSeePrices = Permissions.IsAllowed(user, Perm.CasesViewPrices);
+        canEdit = Permissions.IsAllowed(user, Perm.CasesEdit);
+        canCancel = Permissions.IsAllowed(user, Perm.CasesCancel);
+        canRequest = Permissions.IsAllowed(user, Perm.CasesRequestChange);
+        item = await CaseService.GetByIdAsync(CaseId);
+    }
+}

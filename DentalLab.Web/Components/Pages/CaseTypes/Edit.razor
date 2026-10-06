@@ -1,0 +1,15 @@
+﻿@page "/case-types/new"
+@page "/case-types/{CaseTypeId:int}"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.CaseTypesManage)]
+@using System.ComponentModel.DataAnnotations
+@using DentalLab.Application.Abstractions
+@using DentalLab.Domain.Entities
+@using DentalLab.Web.Components.Shared
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject ICaseTypeService Service
+@inject NavigationManager Nav
+<PageTitle>@(IsNew?"Add Case Type":"Edit Case Type")</PageTitle><h3>@(IsNew?"Add Case Type":"Edit Case Type")</h3>
+@if(model is null){<p>Loading...</p>}else{<EditForm Model="model" OnValidSubmit="Save" FormName="caseTypeForm"><DataAnnotationsValidator/><div class="row g-3" style="max-width:680px"><div class="col-md-5"><label class="form-label">Code</label><InputText class="form-control text-uppercase" @bind-Value="model.Code"/><ValidationMessage For="()=>model.Code"/></div><div class="col-md-7"><label class="form-label">Name</label><InputText class="form-control" @bind-Value="model.Name"/><ValidationMessage For="()=>model.Name"/></div><div class="col-md-6"><label class="form-label">Scope</label><InputSelect class="form-select" @bind-Value="model.Scope"><option value="T">Per tooth</option><option value="A">Whole arch</option></InputSelect></div><div class="col-md-6"><label class="form-label">Display order</label><InputNumber class="form-control" @bind-Value="model.Order"/><ValidationMessage For="()=>model.Order"/></div>@if(!IsNew){<div class="col-12 form-check ms-2"><InputCheckbox class="form-check-input" id="active" @bind-Value="model.Active"/><label class="form-check-label" for="active">Active</label></div>}@if(error is not null){<div class="alert alert-danger">@error</div>}<div class="col-12"><button class="btn btn-primary" disabled="@saving">@(saving?"Saving...":"Save")</button><a class="btn btn-link" href="/case-types">Cancel</a></div></div></EditForm>}
+@code{[Parameter]public int? CaseTypeId{get;set;}private bool IsNew=>CaseTypeId is null;private Form? model;private bool saving;private string? error;protected override async Task OnParametersSetAsync(){if(IsNew){model=new(){Order=await Service.GetNextSequentialOrderAsync()};return;}var x=await Service.GetByIdAsync(CaseTypeId!.Value);if(x is null){Nav.NavigateTo("/case-types");return;}model=new(){Code=x.CaseTypeCode,Name=x.CaseTypeName,Scope=x.Scope,Order=x.DisplayOrder,Active=x.IsActive};}private async Task Save(){saving=true;error=null;try{var x=new CaseType{CaseTypeId=CaseTypeId??0,CaseTypeCode=model!.Code,CaseTypeName=model.Name,Scope=model.Scope,DisplayOrder=model.Order,IsActive=model.Active};if(IsNew)await Service.CreateAsync(x);else await Service.UpdateAsync(x);Nav.NavigateTo("/case-types");}catch(DbUpdateException){error="Code or name already exists, or scope is already used by records.";}finally{saving=false;}}private sealed class Form{[Required,StringLength(20),RegularExpression("^[A-Za-z0-9 _-]+$")]public string Code{get;set;}="";[Required,StringLength(100)]public string Name{get;set;}="";public char Scope{get;set;}='T';[Range(1,32767)]public short Order{get;set;}=100;public bool Active{get;set;}=true;}}

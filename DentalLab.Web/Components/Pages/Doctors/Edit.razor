@@ -1,0 +1,159 @@
+﻿@page "/doctors/new"
+@page "/doctors/{DocId:int}"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.DoctorsManage)]
+@using System.ComponentModel.DataAnnotations
+@using DentalLab.Application.Abstractions
+@using DentalLab.Domain.Entities
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDoctorService DoctorService
+@inject NavigationManager Nav
+
+<PageTitle>@(IsNew ? "Add doctor" : "Edit doctor")</PageTitle>
+
+<h3>@(IsNew ? "Add doctor" : "Edit doctor")</h3>
+
+@if (model is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <EditForm Model="model" OnValidSubmit="Save" FormName="doctorForm">
+        <DataAnnotationsValidator />
+
+        <div class="row g-3" style="max-width:640px">
+
+            <div class="col-12">
+                <label class="form-label">Name</label>
+                <InputText class="form-control" @bind-Value="model.DocName" />
+                <ValidationMessage For="() => model.DocName" />
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label">Phone</label>
+                <InputText class="form-control" @bind-Value="model.Phone" />
+                <ValidationMessage For="() => model.Phone" />
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label">Email</label>
+                <InputText class="form-control" @bind-Value="model.Email" />
+                <ValidationMessage For="() => model.Email" />
+            </div>
+
+            @if (!IsNew)
+            {
+                <div class="col-12 form-check ms-2">
+                    <InputCheckbox class="form-check-input" id="active" @bind-Value="model.IsActive" />
+                    <label class="form-check-label" for="active">Active</label>
+                </div>
+            }
+
+            @if (error is not null)
+            {
+                <div class="col-12">
+                    <div class="alert alert-danger">@error</div>
+                </div>
+            }
+
+            <div class="col-12">
+                <button type="submit" class="btn btn-primary" disabled="@saving">
+                    @(saving ? "Saving..." : "Save")
+                </button>
+                <a class="btn btn-link" href="/doctors">Cancel</a>
+            </div>
+
+        </div>
+    </EditForm>
+}
+
+@code {
+    [Parameter] public int? DocId { get; set; }
+
+    private bool IsNew => DocId is null;
+    private DoctorForm? model;
+    private bool saving;
+    private string? error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsNew)
+        {
+            model = new DoctorForm();
+            return;
+        }
+
+        var d = await DoctorService.GetByIdAsync(DocId!.Value);
+
+        if (d is null)
+        {
+            Nav.NavigateTo("/doctors");
+            return;
+        }
+
+        model = new DoctorForm
+        {
+            DocName = d.DocName,
+            Phone = d.Phone,
+            Email = d.Email,
+            IsActive = d.IsActive
+        };
+    }
+
+    private async Task Save()
+    {
+        saving = true;
+        error = null;
+
+        try
+        {
+            var entity = new Doctor
+            {
+                DocId = DocId ?? 0,
+                DocName = model!.DocName,
+                Phone = model.Phone,
+                Email = model.Email,
+                IsActive = model.IsActive
+            };
+
+            if (IsNew)
+            {
+                await DoctorService.CreateAsync(entity);
+            }
+            else
+            {
+                await DoctorService.UpdateAsync(entity);
+            }
+
+            Nav.NavigateTo("/doctors");
+        }
+        catch (DbUpdateException)
+        {
+            // Violates UQ_Doctors_DocName
+            error = "A doctor with that name already exists.";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private class DoctorForm
+    {
+        [Required(ErrorMessage = "Name is required")]
+        [StringLength(100)]
+        public string DocName { get; set; } = string.Empty;
+
+        [StringLength(20)]
+        [RegularExpression(@"^[0-9+\-\s]*$", ErrorMessage = "Digits, spaces, + and - only")]
+        public string? Phone { get; set; }
+
+        [EmailAddress]
+        [StringLength(150)]
+        public string? Email { get; set; }
+
+        public bool IsActive { get; set; } = true;
+    }
+}

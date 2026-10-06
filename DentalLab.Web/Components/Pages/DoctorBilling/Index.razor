@@ -1,0 +1,1468 @@
+﻿@page "/doctor-bill"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.BillingView)]
+
+@using System.Globalization
+@using DentalLab.Application.Abstractions
+@using DentalLab.Application.Models.Cases
+@using DentalLab.Application.Models.Common
+@using DentalLab.Domain.Entities
+@using DentalLab.Web.Components.Shared
+@using DentalLab.Web.Components.Pages.Dashboard
+@using Microsoft.AspNetCore.Authorization
+
+@using DentalLab.Web.Pdf
+@using DentalLab.Web.Payments
+@using DentalLab.Web.Settings
+@using System.Security.Claims
+@inject ICaseService CaseService
+@inject IDoctorService DoctorService
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@inject DentalLab.Web.Payments.PayLinkService PayLinks
+@inject DentalLab.Web.Settings.AppSettingsStore AppSettings
+@inject DentalLab.Web.Ledger.DoctorLedgerStore Ledger
+@inject PermissionStore Permissions
+@using DentalLab.Web.Ledger
+
+<PageTitle>Doctor Bill</PageTitle>
+
+<div class="doctor-bill-page">
+    <div class="bill-heading no-print">
+        <div>
+            <h3 class="mb-0">Doctor Bill</h3>
+            <small class="text-muted">Generate a printable bill for a single doctor over a date range.</small>
+        </div>
+    </div>
+
+    @* ---------------- 1. Who and when ---------------- *@
+    <div class="card filter-card no-print">
+        <div class="card-body">
+            <div class="bill-filters">
+                <div class="filter-field filter-doctor">
+                    <label class="form-label">Doctor</label>
+                    <DoctorSearchSelect TItem="Doctor"
+                                        Items="doctors"
+                                        IdOf="d => d.DocId"
+                                        NameOf="d => d.DocName"
+                                        @bind-Value="filter.DocId"
+                                        Placeholder="Select a doctor"
+                                        Small="true" />
+                </div>
+
+                <div class="filter-field filter-date">
+                    <label class="form-label">From</label>
+                    <InputDate class="form-control form-control-sm" @bind-Value="filter.FromDate" />
+                </div>
+
+                <div class="filter-field filter-date">
+                    <label class="form-label">To</label>
+                    <InputDate class="form-control form-control-sm" @bind-Value="filter.ToDate" />
+                </div>
+
+                <div class="filter-field">
+                    <label class="form-label">Quick period</label>
+                    <div class="seg" role="group" aria-label="Quick period">
+                        <button type="button" class="seg-btn @(IsMonth(0) ? "active" : "")" aria-pressed="@(IsMonth(0) ? "true" : "false")" @onclick="() => SetMonth(0)">This month</button>
+                        <button type="button" class="seg-btn @(IsMonth(-1) ? "active" : "")" aria-pressed="@(IsMonth(-1) ? "true" : "false")" @onclick="() => SetMonth(-1)">Last month</button>
+                    </div>
+                </div>
+
+                <div class="filter-actions">
+                    <button type="button" class="act-btn act-primary" disabled="@(loading || filter.DocId is null)" @onclick="GenerateAsync"
+                            title="@(filter.DocId is null ? "Select a doctor first" : "Create the bill for this doctor and period")">
+                        @if (loading)
+                        {
+                            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                            <span>Generating&hellip;</span>
+                        }
+                        else
+                        {
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+                            <span>Generate bill</span>
+                        }
+                    </button>
+                    <button type="button" class="act-btn act-ghost" disabled="@loading" @onclick="ResetAsync" title="Clear doctor, period and all options">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+                        <span>Reset</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* ---------------- 2. Bill options (apply instantly) ---------------- *@
+    <div class="card options-card no-print">
+        <div class="options-tabs" role="tablist" aria-label="Bill options">
+            <button type="button" role="tab" class="options-tab @(optionsTab == "charges" ? "active" : "")" aria-selected="@(optionsTab == "charges" ? "true" : "false")" @onclick='() => optionsTab = "charges"'>
+                Charges
+                @if (applyGst || oldDue != 0)
+                {
+                    <span class="tab-hint">@(applyGst ? $"GST {gstPercentage:0.##}%" : "")@(applyGst && oldDue != 0 ? " · " : "")@(oldDue != 0 ? "Old due" : "")</span>
+                }
+            </button>
+            <button type="button" role="tab" class="options-tab @(optionsTab == "adjust" ? "active" : "")" aria-selected="@(optionsTab == "adjust" ? "true" : "false")" @onclick='() => optionsTab = "adjust"'>
+                Adjustments
+                @if (ValidAdjustments.Any())
+                {
+                    <span class="tab-badge">@ValidAdjustments.Count()</span>
+                }
+            </button>
+            <button type="button" role="tab" class="options-tab @(optionsTab == "show" ? "active" : "")" aria-selected="@(optionsTab == "show" ? "true" : "false")" @onclick='() => optionsTab = "show"'>
+                Show on bill
+            </button>
+            <button type="button" role="tab" class="options-tab @(optionsTab == "pay" ? "active" : "")" aria-selected="@(optionsTab == "pay" ? "true" : "false")" @onclick='() => optionsTab = "pay"'>
+                Payment &amp; note
+                @if (!string.IsNullOrWhiteSpace(note))
+                {
+                    <span class="tab-hint">note added</span>
+                }
+            </button>
+            <span class="options-hint">Changes show on the bill straight away.</span>
+        </div>
+
+        <div class="options-body">
+            @switch (optionsTab)
+            {
+                case "charges":
+                    <div class="options-pane">
+                        <div class="options-grid">
+                            <div class="filter-field old-due-field">
+                                <label class="form-label" for="oldDue">
+                                    Old due (&#8377;)
+                                    @if (OldDueIsAuto)
+                                    {
+                                        <span class="auto-pill" title="Worked out from earlier bills and payments received">auto</span>
+                                    }
+                                    else if (dueInfo is { BeforeTracking: false })
+                                    {
+                                        <span class="auto-pill is-edited" title="Typed by hand">edited</span>
+                                    }
+                                </label>
+                                <input id="oldDue" type="number" step="0.01" class="form-control form-control-sm" @bind="oldDue" />
+                                @if (dueInfo is { } info)
+                                {
+                                    if (info.BeforeTracking)
+                                    {
+                                        <div class="form-text">Dues are tracked from @info.TrackingStart.ToString("dd MMM yyyy"). For an earlier period, type the old due by hand.</div>
+                                    }
+                                    else
+                                    {
+                                        <div class="form-text due-calc">
+                                            Previous balance @SignedBalance(info.PreviousBalance) &minus; received @Money(info.ReceivedInWindow) = <strong>@SignedBalance(info.OldDue)</strong>
+                                            @if (!OldDueIsAuto)
+                                            {
+                                                <button type="button" class="link-btn" @onclick="UseCalculatedOldDue">Use @SignedBalance(info.OldDue)</button>
+                                            }
+                                        </div>
+                                    }
+                                }
+                                else if (dueError is not null)
+                                {
+                                    <div class="form-text text-danger">@dueError</div>
+                                }
+                            </div>
+                            <div class="filter-field">
+                                <label class="form-label" for="payUpTo">Payments received up to</label>
+                                <input id="payUpTo" type="date" class="form-control form-control-sm" @bind="paymentsUpTo" @bind:after="RefreshOldDueAsync" disabled="@(!generated || dueInfo is null or { BeforeTracking: true })" />
+                                <div class="form-text">
+                                    @if (dueInfo is { BeforeTracking: false } win)
+                                    {
+                                        @($"{win.ReceivedCount} payment{(win.ReceivedCount == 1 ? "" : "s")} from {win.WindowFrom:dd MMM} counted.")
+                                    }
+                                    else
+                                    {
+                                        @("Payments from the bill's start date to this date reduce the old due.")
+                                    }
+                                    @if (Permissions.IsAllowed(currentUser, Perm.PaymentsView) && filter.DocId is { } payDoc)
+                                    {
+                                        <a class="ms-1" href="@($"doctor-payments?doc={payDoc}")">Payments &rarr;</a>
+                                    }
+                                </div>
+                            </div>
+                            <div class="filter-field">
+                                <label class="form-label">GST</label>
+                                <div class="input-group input-group-sm">
+                                    <div class="input-group-text">
+                                        <input class="form-check-input mt-0" type="checkbox" id="chkApplyGst" @bind="applyGst" aria-label="Apply GST" />
+                                    </div>
+                                    <input type="number" step="0.5" min="0" max="28" class="form-control" @bind="gstPercentage" disabled="@(!applyGst)" aria-label="GST percentage" />
+                                    <span class="input-group-text">%</span>
+                                </div>
+                                <div class="form-text">Split equally as CGST + SGST.</div>
+                            </div>
+                            <div class="filter-field">
+                                <label class="form-label" for="gstin">GSTIN (optional)</label>
+                                <input id="gstin" class="form-control form-control-sm" @bind="gstin" @bind:event="oninput" placeholder="e.g. 36AAAAA0000A1Z5" />
+                            </div>
+                        </div>
+                    </div>
+                    break;
+
+                case "adjust":
+                    <div class="options-pane">
+                        <div class="adjust-help">
+                            Type a minus before the amount to <strong>subtract</strong> (<code>-500</code>); without it the amount is <strong>added</strong> (<code>500</code>).
+                        </div>
+                        <div class="adjust-help adjust-help-note">
+                            Received money from the doctor? Record it on <strong>Doctor Payments</strong> instead &ndash; it then reduces the Old due automatically. Adding it here as well would count it twice.
+                        </div>
+
+                        @if (adjustments.Count > 0)
+                        {
+                            <div class="adjust-list">
+                                @foreach (var adj in adjustments)
+                                {
+                                    var row = adj;
+                                    var parsed = ParseAmount(row.AmountText);
+                                    <div class="adjust-row" @key="row.Id">
+                                        <input class="form-control form-control-sm" placeholder="Description, e.g. Paid by cash"
+                                               maxlength="80" @bind="row.Description" @bind:event="oninput" aria-label="Adjustment description" />
+                                        <input class="form-control form-control-sm adjust-amount @(row.AmountText.Length > 0 && parsed is null ? "is-invalid" : "")"
+                                               placeholder="-500 or 500" inputmode="decimal"
+                                               @bind="row.AmountText" @bind:event="oninput" aria-label="Adjustment amount" />
+                                        <span class="adjust-result @(parsed < 0 ? "minus" : parsed > 0 ? "plus" : "")">
+                                            @(parsed is null ? (row.AmountText.Length > 0 ? "not a number" : "") : SignedMoney(parsed.Value))
+                                        </span>
+                                        <button type="button" class="icon-btn icon-danger" title="Remove this line" aria-label="Remove adjustment" @onclick="() => adjustments.Remove(row)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M9 7V4h6v3"/></svg></button>
+                                    </div>
+                                }
+                            </div>
+                        }
+
+                        <div class="adjust-actions">
+                            <button type="button" class="act-btn act-add" @onclick='() => AddAdjustment("", "")'><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add adjustment</span></button>
+                            <span class="text-muted small">Quick add:</span>
+                            <button type="button" class="chip" @onclick='() => AddAdjustment("Paid by cash", "-")'>Paid by cash</button>
+                            <button type="button" class="chip" @onclick='() => AddAdjustment("Paid by PhonePe", "-")'>Paid by PhonePe</button>
+                            <button type="button" class="chip" @onclick='() => AddAdjustment("Advance paid", "-")'>Advance paid</button>
+                            <button type="button" class="chip" @onclick='() => AddAdjustment("Discount", "-")'>Discount</button>
+                            <button type="button" class="chip" @onclick='() => AddAdjustment("Courier charges", "")'>Courier charges</button>
+                        </div>
+
+                        @if (ValidAdjustments.Any())
+                        {
+                            <div class="adjust-total">Net adjustment: <strong class="@(AdjustmentsTotal < 0 ? "text-danger" : "text-success")">@SignedMoney(AdjustmentsTotal)</strong></div>
+                        }
+                    </div>
+                    break;
+
+                case "show":
+                    <div class="options-pane">
+                        <div class="switch-grid">
+                            <label class="switch-tile">
+                                <input class="form-check-input" type="checkbox" role="switch" @bind="showCaseId" />
+                                <span><strong>Case ID</strong><small>Case number column</small></span>
+                            </label>
+                            <label class="switch-tile">
+                                <input class="form-check-input" type="checkbox" role="switch" @bind="showPatientName" />
+                                <span><strong>Patient</strong><small>Patient name and reference</small></span>
+                            </label>
+                            <label class="switch-tile">
+                                <input class="form-check-input" type="checkbox" role="switch" @bind="showTypeSummary" />
+                                <span><strong>Case type summary</strong><small>Units and amount per type</small></span>
+                            </label>
+                            <label class="switch-tile">
+                                <input class="form-check-input" type="checkbox" role="switch" @bind="showWatermark" />
+                                <span><strong>Watermark</strong><small>Faded logo behind the bill</small></span>
+                            </label>
+                            <label class="switch-tile">
+                                <input class="form-check-input" type="checkbox" role="switch" @bind="showUpiPay" />
+                                <span><strong>UPI QR &amp; pay link</strong><small>Scan or tap to pay the grand total</small></span>
+                            </label>
+                            <label class="switch-tile">
+                                <input class="form-check-input" type="checkbox" role="switch" @bind="showDueBreakdown" />
+                                <span><strong>Old due breakdown</strong><small>Previous balance and payments received</small></span>
+                            </label>
+                            <label class="switch-tile">
+                                <input class="form-check-input" type="checkbox" role="switch" @bind="showPaymentLine" />
+                                <span><strong>Payment line</strong><small>&ldquo;Please pay your bills to&hellip;&rdquo;</small></span>
+                            </label>
+                        </div>
+                    </div>
+                    break;
+
+                case "pay":
+                    <div class="options-pane">
+                        <div class="pay-sections">
+                            <section class="pay-section">
+                                <h4 class="pay-section-title">Payment line <small>printed text</small></h4>
+                                <div class="pay-fields">
+                                    <div class="filter-field">
+                                        <label class="form-label" for="payTo">Pay to (number)</label>
+                                        <input id="payTo" class="form-control form-control-sm" maxlength="60" @bind="payTo" @bind:event="oninput" />
+                                    </div>
+                                    <div class="filter-field">
+                                        <label class="form-label" for="payApp">Payment app</label>
+                                        <select id="payApp" class="form-select form-select-sm" @bind="payApp">
+                                            @foreach (var app in PaymentApps)
+                                            {
+                                                <option value="@app">@app</option>
+                                            }
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="pay-preview-box">
+                                    @if (showPaymentLine && !string.IsNullOrWhiteSpace(PaymentCaption))
+                                    {
+                                        @PaymentCaption
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">Hidden (turn on &ldquo;Payment line&rdquo; in Show on bill)</span>
+                                    }
+                                </div>
+                            </section>
+
+                            <section class="pay-section">
+                                <h4 class="pay-section-title">UPI pay link &amp; QR <small>scan or tap to pay</small></h4>
+                                <div class="pay-fields">
+                                    <div class="filter-field">
+                                        <label class="form-label" for="upiId">UPI ID</label>
+                                        <input id="upiId" class="form-control form-control-sm @(UpiIdValid ? "" : "is-invalid")" maxlength="80"
+                                               placeholder="e.g. 9966684787@@ybl" @bind="upiId" @bind:event="oninput" @onblur="UpiIdLeft" autocomplete="off" spellcheck="false" />
+                                        @if (!UpiIdValid)
+                                        {
+                                            <div class="invalid-feedback">Enter a UPI ID like 9966684787@@ybl</div>
+                                        }
+                                    </div>
+                                    <div class="filter-field">
+                                        <label class="form-label" for="payeeName">Payee name</label>
+                                        <input id="payeeName" class="form-control form-control-sm" maxlength="60" @bind="payeeName" @bind:event="oninput" />
+                                    </div>
+                                </div>
+                                <div class="pay-preview-box">
+                                    @if (!showUpiPay)
+                                    {
+                                        <span class="text-muted">Hidden (turn on &ldquo;UPI QR &amp; pay link&rdquo; in Show on bill)</span>
+                                    }
+                                    else if (!UpiIdValid)
+                                    {
+                                        <span class="text-danger">Fix the UPI ID</span>
+                                    }
+                                    else if (!generated || GrandTotal <= 0)
+                                    {
+                                        <span class="text-muted">Shows when the grand total is above &#8377;0</span>
+                                    }
+                                    else
+                                    {
+                                        <span>Ready: @UpiPayment.AmountLabel(GrandTotal) &middot; &ldquo;@UpiNote&rdquo;</span>
+                                    }
+                                </div>
+                            </section>
+                        </div>
+
+                        @if (askUpiDefault && UpiIdValid && !string.Equals(upiId.Trim(), defaults.UpiId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            <div class="upi-ask" role="alertdialog" aria-live="polite" aria-labelledby="upiAskTitle">
+                                <span class="upi-ask-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg></span>
+                                <div class="upi-ask-text">
+                                    <strong id="upiAskTitle">Make <span class="upi-ask-id">@upiId.Trim()</span> the default UPI ID?</strong>
+                                    <span>New bills for all users will use it for the pay link and QR code. The current default is @defaults.UpiId.</span>
+                                </div>
+                                <div class="upi-ask-actions">
+                                    <button type="button" class="act-btn act-ghost act-sm" disabled="@savingDefaults" @onclick="KeepUpiForThisBill">Only this bill</button>
+                                    <button type="button" class="act-btn act-primary act-sm" disabled="@savingDefaults" @onclick="MakeUpiDefaultAsync">
+                                        @(savingDefaults ? "Saving…" : "Yes, make default")
+                                    </button>
+                                </div>
+                            </div>
+                        }
+
+                        @* ---- defaults bar ---- *@
+                        <div class="defaults-bar">
+                            <div class="defaults-info">
+                                @if (PaymentDiffersFromDefaults)
+                                {
+                                    <span class="defaults-dot changed" aria-hidden="true"></span>
+                                    <span>Changed for this bill only.</span>
+                                }
+                                else
+                                {
+                                    <span class="defaults-dot" aria-hidden="true"></span>
+                                    <span>Using the saved defaults.</span>
+                                }
+                                @if (defaultsSavedAt is not null)
+                                {
+                                    <span class="text-muted">Saved @defaultsSavedAt.Value.ToLocalTime().ToString("dd MMM yyyy")@(string.IsNullOrWhiteSpace(defaultsSavedBy) ? "" : $" by {defaultsSavedBy}").</span>
+                                }
+                            </div>
+                            <div class="defaults-actions">
+                                <button type="button" class="act-btn act-ghost act-sm" disabled="@(!PaymentDiffersFromDefaults)" @onclick="UseSavedDefaults"
+                                        title="Put back the saved payment details">
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+                                    <span>Use saved</span>
+                                </button>
+                                @if (isOwner)
+                                {
+                                    <button type="button" class="act-btn act-secondary act-sm" disabled="@(savingDefaults || !PaymentDiffersFromDefaults || !UpiIdValid)"
+                                            @onclick="SaveDefaultsAsync" title="Use these payment details on every new bill">
+                                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M7 3v5h8V3M7 21v-7h10v7"/></svg>
+                                        <span>@(savingDefaults ? "Saving…" : "Save as default")</span>
+                                    </button>
+                                }
+                                else
+                                {
+                                    <span class="defaults-owner-note">Only the owner can change the defaults.</span>
+                                }
+                            </div>
+                        </div>
+                        @if (defaultsMessage is not null)
+                        {
+                            <div class="defaults-message @(defaultsMessageIsError ? "is-error" : "")" role="status">@defaultsMessage</div>
+                        }
+
+                        <div class="filter-field mt-3">
+                            <label class="form-label" for="billNote">Note (optional) &ndash; printed at the end of the bill</label>
+                            <textarea id="billNote" class="form-control form-control-sm" rows="2" maxlength="500"
+                                      placeholder="e.g. Kindly clear your dues by the 10th of this month."
+                                      @bind="note" @bind:event="oninput"></textarea>
+                            <div class="form-text text-end">@(note?.Length ?? 0)/500</div>
+                        </div>
+                    </div>
+                    break;
+            }
+        </div>
+    </div>
+
+    @if (loading)
+    {
+        <div class="text-center py-4 no-print">
+            <div class="spinner-border spinner-border-sm" role="status" aria-label="Loading"></div>
+            <span class="ms-2">Preparing bill...</span>
+        </div>
+    }
+    else if (!string.IsNullOrWhiteSpace(error))
+    {
+        <div class="alert alert-danger no-print">@error</div>
+    }
+    else if (!generated)
+    {
+        <div class="alert alert-info no-print">Choose a doctor and date range, then select <strong>Generate bill</strong>.</div>
+    }
+    else
+    {
+        <div class="bill-actionbar no-print" role="toolbar" aria-label="Bill actions">
+            <div class="bill-actionbar-info">
+                <span class="bill-ready-dot" aria-hidden="true"></span>
+                <div>
+                    <strong>@SelectedDoctorName</strong>
+                    <span class="text-muted">&middot; @cases.Count case(s) &middot; @cases.Sum(c => c.TotalUnits) units</span>
+                </div>
+                <span class="bill-actionbar-total">Grand total <strong>@Money(GrandTotal)</strong></span>
+            </div>
+            <div class="bill-actionbar-buttons">
+                <span class="ledger-status @LedgerStatus.Css" title="@LedgerStatus.Tip">@LedgerStatus.Text</span>
+                <button type="button" class="act-btn act-secondary" disabled="@(savingBill || !CanSaveBill)" @onclick="SaveBillToLedgerAsync"
+                        title="@(CanSaveBill ? "Keep this bill's GST and adjustments in the doctor's dues, so they carry forward" : "Choose a From and To date to save the bill")">
+                    @if (savingBill)
+                    {
+                        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                        <span>Saving&hellip;</span>
+                    }
+                    else
+                    {
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></svg>
+                        <span>@(savedBill is null ? "Save to ledger" : "Update ledger")</span>
+                    }
+                </button>
+                <button type="button" class="act-btn act-secondary" @onclick="PrintAsync" title="Print, or save with the browser's dialog">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/></svg>
+                    <span>Print</span>
+                </button>
+                <button type="button" class="act-btn act-primary" disabled="@downloading" @onclick="DownloadPdfAsync" title="Save @(PdfFileName).pdf to your Downloads">
+                    @if (downloading)
+                    {
+                        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                        <span>Preparing PDF&hellip;</span>
+                    }
+                    else
+                    {
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+                        <span>Download PDF</span>
+                    }
+                </button>
+            </div>
+        </div>
+
+        <div class="bill-sheet @(showWatermark ? "has-watermark" : "")">
+            @if (downloadError is not null)
+            {
+                <div class="alert alert-warning no-print">@downloadError</div>
+            }
+            @if (saveBillMessage is not null)
+            {
+                <div class="alert @(saveBillError ? "alert-danger" : "alert-success") no-print py-2">@saveBillMessage</div>
+            }
+
+            <header class="bill-letterhead">
+                <div class="bill-brand">
+                    <span class="bill-brand-mark" aria-hidden="true">
+                        <svg viewBox="0 0 40 40" width="40" height="40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M20 4c-3.2 0-5 1.7-7.4 1.7-2.6 0-4.9-1.4-7-1.1-2.8.4-4.4 3-4.2 6.4.3 5.2 1.7 9.9 3.4 14.3 1.2 3.1 2.1 6.9 4.6 6.9 2.3 0 2.3-4.9 3.6-9.6.7-2.5 1.4-4.3 2.9-4.3s2.3 1.9 2.9 4.3c1.3 4.7 1.3 9.6 3.6 9.6 2.5 0 3.4-3.8 4.6-6.9 1.7-4.4 3.1-9.1 3.4-14.3.2-3.4-1.4-6-4.2-6.4-2.1-.3-4.4 1.1-7 1.1-.7 0-1.4-.2-2.2-.4V4Z" fill="url(#billToothGrad)" />
+                            <defs>
+                                <linearGradient id="billToothGrad" x1="4" y1="4" x2="34" y2="36" gradientUnits="userSpaceOnUse">
+                                    <stop stop-color="#5eead4" />
+                                    <stop offset="1" stop-color="#0f766e" />
+                                </linearGradient>
+                            </defs>
+                        </svg>
+                    </span>
+                    <div class="bill-brand-text">
+                        <strong style="font-size: 1.2rem;">Natural Dental Labs</strong>
+                        <span class="text-muted" style="font-size: 0.85rem;">Case &amp; billing console</span>
+                    </div>
+                </div>
+                <div class="bill-meta">
+                    @if (!string.IsNullOrWhiteSpace(gstin))
+                    {
+                        <div class="bill-gstin"><span class="text-muted">GSTIN: </span><strong>@gstin</strong></div>
+                    }
+                    <div><span class="text-muted me-2">Bill for:</span><strong>@SelectedDoctorName</strong></div>
+                    <div><span class="text-muted me-2">Period:</span><strong>@PeriodLabel</strong></div>
+                    <div><span class="text-muted me-2">Generated:</span><strong>@DateTime.Now.ToString("dd MMM yyyy")</strong></div>
+                </div>
+            </header>
+
+            @if (cases.Sum(c => c.Lines.Count) == 0)
+            {
+                <EmptyState Title="No active cases" Text="No active cases were found for this doctor in the selected period." />
+            }
+            else
+            {
+                <div class="table-responsive bill-table-container">
+                    <table class="table table-sm table-bordered align-middle bill-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">S.No.</th>
+                                @if (showCaseId)
+                                {
+                                    <th>Case ID</th>
+                                }
+                                <th>Date</th>
+                                @if (showPatientName)
+                                {
+                                    <th>Patient</th>
+                                }
+                                <th>Teeth / Arch</th>
+                                <th>Type</th>
+                                <th class="text-end">Units</th>
+                                <th class="text-end">Unit Amount</th>
+                                <th class="text-end">Total Amount</th>
+                            </tr>
+                        </thead>
+                        @{
+                            int serialNumber = 1;
+                        }
+                        @foreach (var item in cases)
+                        {
+                            var rowSpan = Math.Max(item.Lines.Count, 1);
+
+                            <tbody class="bill-case-group" @key="item.CaseId">
+                                @for (var index = 0; index < item.Lines.Count; index++)
+                                {
+                                    var line = item.Lines[index];
+                                    <tr>
+                                        @if (index == 0)
+                                        {
+                                            <td rowspan="@rowSpan">@(serialNumber++)</td>
+
+                                            @if (showCaseId)
+                                            {
+                                                <td rowspan="@rowSpan" class="case-id-cell">#@item.CaseId</td>
+                                            }
+
+                                            <td rowspan="@rowSpan" class="text-nowrap">@item.CaseDate.ToString("dd/MM/yyyy")</td>
+
+                                            @if (showPatientName)
+                                            {
+                                                <td rowspan="@rowSpan">
+                                                    <div class="patient-cell">
+                                                        <span>@DisplayValue(item.PatientName)</span>
+                                                        @if (!string.IsNullOrWhiteSpace(item.PatientRef))
+                                                        {
+                                                            <small class="text-muted">@item.PatientRef</small>
+                                                        }
+                                                    </div>
+                                                </td>
+                                            }
+                                        }
+
+                                        <td class="teeth-cell">
+                                            <CompactToothGrid Scope="@line.Scope" Arch="@line.Arch" UR="@line.UR" UL="@line.UL" LR="@line.LR" LL="@line.LL" />
+                                        </td>
+                                        <td><span class="@Badge(line.CaseTypeCode)">@line.CaseTypeCode</span></td>
+                                        <td class="text-end">@line.Units</td>
+                                        <td class="text-end text-nowrap">@line.UnitRate.ToString("N2")</td>
+
+                                        @if (index == 0)
+                                        {
+                                            <td rowspan="@rowSpan" class="text-end text-nowrap total-amount-cell">@item.TotalAmount.ToString("N2")</td>
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                        }
+                    </table>
+                </div>
+
+                <div class="bill-totals-section">
+                    <!-- Left Side: Case Type Summary Table -->
+                    <div class="type-summary-table">
+                        @* Left box stays (empty) when hidden, so the totals keep their place on the right *@
+                        @if (showTypeSummary && TypeSummaries.Any())
+                        {
+                            <table class="table table-sm table-bordered bill-table mb-0">
+                                <colgroup>
+                                    <col style="width: 40%;" />
+                                    <col style="width: 30%;" />
+                                    <col style="width: 30%;" />
+                                </colgroup>
+                                <thead>
+                                    <tr>
+                                        <th colspan="3" class="text-center bg-light">Case Type Summary</th>
+                                    </tr>
+                                    <tr>
+                                        <th>Type</th>
+                                        <th class="text-end">Total Units</th>
+                                        <th class="text-end">Total Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var summary in TypeSummaries)
+                                    {
+                                        <tr>
+                                            <td><span class="@Badge(summary.Type)">@summary.Type</span></td>
+                                            <td class="text-end">@summary.Units</td>
+                                            <td class="text-end">@Money(summary.Amount)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                                <tfoot>
+                                    <tr class="fw-semibold">
+                                        <td>Total</td>
+                                        <td class="text-end">@TypeSummaries.Sum(x => x.Units)</td>
+                                        <td class="text-end">@Money(TypeSummaries.Sum(x => x.Amount))</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        }
+                    </div>
+
+                    <!-- Right Side: Financial Totals -->
+                    <div class="bill-summary">
+                        <div class="bill-summary-row">
+                            <span>Current period total</span>
+                            <strong>@Money(subtotal)</strong>
+                        </div>
+                        @if (applyGst)
+                        {
+                            <div class="bill-summary-row text-muted" style="font-size: 0.9em;">
+                                <span>CGST (@(gstPercentage / 2)%)</span>
+                                <strong>@Money(GstAmount / 2)</strong>
+                            </div>
+                            <div class="bill-summary-row text-muted" style="font-size: 0.9em;">
+                                <span>SGST (@(gstPercentage / 2)%)</span>
+                                <strong>@Money(GstAmount / 2)</strong>
+                            </div>
+                        }
+                        @if (ShowBreakdownRows)
+                        {
+                            <div class="bill-summary-row">
+                                <span>Previous balance</span>
+                                <strong>@SignedBalance(dueInfo!.PreviousBalance)</strong>
+                            </div>
+                            <div class="bill-summary-row due-paid">
+                                <span>Payments received</span>
+                                <strong>@SignedMoney(-dueInfo!.ReceivedInWindow)</strong>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="bill-summary-row">
+                                <span>@(oldDue < 0 ? "Advance (credit)" : "Old due")</span>
+                                <strong>@SignedBalance(oldDue)</strong>
+                            </div>
+                        }
+                        @foreach (var adj in ValidAdjustments)
+                        {
+                            <div class="bill-summary-row @(adj.Amount < 0 ? "adj-minus" : "adj-plus")">
+                                <span>@adj.Description</span>
+                                <strong>@SignedMoney(adj.Amount)</strong>
+                            </div>
+                        }
+                        <div class="bill-summary-row bill-grand-total">
+                            <span>Grand total</span>
+                            <strong>@Money(GrandTotal)</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <section class="bill-closing">
+                    <div class="bill-words">
+                        <span class="bill-label">Amount in words</span>
+                        <span class="bill-words-text">Rupees @NumberToWords(Math.Abs(GrandTotal)) Only.@(GrandTotal < 0 ? " (credit in your favour)" : "")</span>
+                    </div>
+
+                    @if (showPaymentLine && !string.IsNullOrWhiteSpace(PaymentCaption))
+                    {
+                        <div class="bill-pay-line">@PaymentCaption</div>
+                    }
+
+                    @if (PayInfo is { } pay)
+                    {
+                        <div class="bill-upi">
+                            <img class="bill-upi-qr" src="@pay.QrDataUri" alt="UPI QR code to pay @UpiPayment.AmountLabel(GrandTotal)" width="112" height="112" />
+                            <div class="bill-upi-text">
+                                <strong>Scan &amp; pay with any UPI app</strong>
+                                <a class="bill-upi-link" href="@pay.PageUrl" target="_blank" rel="noopener">Tap here to pay @UpiPayment.AmountLabel(GrandTotal)</a>
+                                <span class="bill-upi-meta">UPI ID: <strong>@pay.Request.UpiId</strong> &middot; @pay.Request.PayeeName</span>
+                                <span class="bill-upi-meta">Note: @pay.Request.Note</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(note))
+                    {
+                        <div class="bill-note">
+                            <span class="bill-label">Note</span>
+                            <div class="bill-note-text">@note.Trim()</div>
+                        </div>
+                    }
+                </section>
+
+                <footer class="bill-footer">
+                    <span>Thank you for partnering with Natural Dental Labs.</span>
+                    <strong>&ndash; M Chandramohan Reddy</strong>
+                </footer>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+
+    private readonly CaseFilter filter = new()
+    {
+        Status = "Active",
+        PageNumber = 1,
+        PageSize = 200,
+        FromDate = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1),
+        ToDate = DateOnly.FromDateTime(DateTime.Today)
+    };
+
+    private List<Doctor> doctors = [];
+    private List<CaseListItem> cases = [];
+    private decimal oldDue;
+
+    // ---- old due from the doctor's ledger (payments page) ----
+    [SupplyParameterFromQuery(Name = "doc")]
+    public int? QueryDoc { get; set; }
+
+    private ClaimsPrincipal currentUser = new();
+    private OldDueInfo? dueInfo;
+    private string? dueError;
+    private DateOnly paymentsUpTo = DoctorLedgerStore.Today;
+    private bool showDueBreakdown = true;
+    private SavedBill? savedBill;
+    private bool savingBill;
+    private string? saveBillMessage;
+    private bool saveBillError;
+
+    /// <summary>Old due still equals the calculated figure (not typed over).</summary>
+    private bool OldDueIsAuto => dueInfo is { BeforeTracking: false } info && oldDue == info.OldDue;
+
+    private bool ShowBreakdownRows => showDueBreakdown && OldDueIsAuto && dueInfo!.ReceivedInWindow != 0;
+
+    private bool CanSaveBill => generated && filter.DocId is not null && filter.FromDate is not null && filter.ToDate is not null;
+
+    private sealed record StatusChip(string Text, string Css, string Tip);
+
+    private StatusChip LedgerStatus
+    {
+        get
+        {
+            var extras = GstAmount + AdjustmentsTotal;
+            if (savedBill is null)
+            {
+                return extras != 0
+                    ? new StatusChip("Not saved", "is-warn", "GST / adjustments on this bill won't carry forward to the next bill until you save it.")
+                    : new StatusChip("Not saved", "is-muted", "Saving is optional here: case work and payments already carry forward.");
+            }
+
+            var same = savedBill.GstAmount == GstAmount && savedBill.AdjustmentsTotal == AdjustmentsTotal && savedBill.GrandTotal == GrandTotal;
+            var when = savedBill.SavedAtUtc.ToLocalTime().ToString("dd MMM, h:mm tt", CultureInfo.InvariantCulture);
+            return same
+                ? new StatusChip($"Saved {savedBill.SavedAtUtc.ToLocalTime():dd MMM}", "is-ok", $"Saved {when} by {savedBill.SavedBy}")
+                : new StatusChip("Changed since saved", "is-warn", $"Saved {when} by {savedBill.SavedBy}: grand total {Money(savedBill.GrandTotal)}. Update the ledger if this bill is final.");
+        }
+    }
+
+    private async Task LoadLedgerInfoAsync(bool setOldDue)
+    {
+        dueInfo = null;
+        dueError = null;
+        savedBill = null;
+        if (filter.DocId is not { } docId || filter.FromDate is not { } from)
+        {
+            return;
+        }
+
+        try
+        {
+            dueInfo = await Ledger.GetOldDueAsync(docId, from, paymentsUpTo);
+            if (setOldDue && !dueInfo.BeforeTracking)
+            {
+                oldDue = dueInfo.OldDue;
+            }
+
+            if (filter.ToDate is { } to)
+            {
+                savedBill = await Ledger.GetSavedBillAsync(docId, from, to);
+            }
+        }
+        catch (Exception)
+        {
+            dueInfo = null;
+            dueError = "Old due could not be worked out automatically. Type it by hand.";
+        }
+    }
+
+    private async Task RefreshOldDueAsync()
+    {
+        // Keep a hand-typed old due; follow the calculation otherwise.
+        var follow = dueInfo is null || OldDueIsAuto;
+        await LoadLedgerInfoAsync(follow);
+    }
+
+    private void UseCalculatedOldDue()
+    {
+        if (dueInfo is { BeforeTracking: false } info)
+        {
+            oldDue = info.OldDue;
+        }
+    }
+
+    private async Task SaveBillToLedgerAsync()
+    {
+        if (!CanSaveBill || filter.DocId is not { } docId || filter.FromDate is not { } from || filter.ToDate is not { } to)
+        {
+            return;
+        }
+
+        savingBill = true;
+        saveBillMessage = null;
+        try
+        {
+            var by = currentUser.FindFirstValue(ClaimTypes.Email) ?? currentUser.Identity?.Name ?? "unknown";
+            var adjustmentsText = string.Join("; ", ValidAdjustments.Select(a => $"{a.Description} {SignedMoney(a.Amount)}"));
+            var replaced = await Ledger.SaveBillAsync(new SaveBillRequest(
+                docId, from, to, subtotal, GstAmount, AdjustmentsTotal,
+                adjustmentsText.Length == 0 ? null : adjustmentsText,
+                oldDue, GrandTotal), by);
+
+            savedBill = await Ledger.GetSavedBillAsync(docId, from, to);
+            saveBillMessage = replaced.Count == 0
+                ? $"Saved to {SelectedDoctorName}'s ledger." + (GstAmount + AdjustmentsTotal != 0 ? " GST and adjustments will carry forward to the next bill." : "")
+                : $"Saved. It replaces the earlier saved bill for {string.Join(", ", replaced.Select(r => $"{r.From:dd MMM} \u2013 {r.To:dd MMM yyyy}"))}.";
+            saveBillError = false;
+        }
+        catch (Exception)
+        {
+            saveBillMessage = "The bill could not be saved to the ledger. Please try again.";
+            saveBillError = true;
+        }
+        finally
+        {
+            savingBill = false;
+        }
+    }
+
+    /// <summary>Old due / balance: an advance (negative) gets a minus sign.</summary>
+    private static string SignedBalance(decimal value) => value < 0 ? "\u2212 " + Money(-value) : Money(value);
+    // ---- bill options ----
+    private string optionsTab = "charges";
+    private readonly List<Adjustment> adjustments = [];
+    private bool showPaymentLine = false;   // off by default
+    private string payTo = BillDefaults.PayTo;
+    private string payApp = BillDefaults.PayApp;
+    private const string DefaultNote = "Kindly clear your dues by the 10th of this month.";
+    private string? note = DefaultNote;
+
+    // ---- UPI pay link & QR ----
+    private bool showUpiPay = true;
+    private string upiId = BillDefaults.UpiId;
+    private string payeeName = BillDefaults.PayeeName;
+
+    // ---- saved payment defaults (owner can change them) ----
+    private sealed record PaymentDefaults(string UpiId, string PayeeName, string PayTo, string PayApp);
+
+    private PaymentDefaults defaults = new(BillDefaults.UpiId, BillDefaults.PayeeName, BillDefaults.PayTo, BillDefaults.PayApp);
+    private bool isOwner;
+    private bool savingDefaults;
+    private string? defaultsMessage;
+    private bool defaultsMessageIsError;
+    private DateTime? defaultsSavedAt;
+    private string? defaultsSavedBy;
+
+    private PaymentDefaults CurrentPayment => new(upiId.Trim(), payeeName.Trim(), payTo.Trim(), payApp);
+
+    private bool PaymentDiffersFromDefaults => CurrentPayment != defaults;
+
+    private async Task LoadDefaultsAsync()
+    {
+        defaults = new PaymentDefaults(
+            await AppSettings.GetAsync(BillDefaults.UpiIdKey, BillDefaults.UpiId),
+            await AppSettings.GetAsync(BillDefaults.PayeeNameKey, BillDefaults.PayeeName),
+            await AppSettings.GetAsync(BillDefaults.PayToKey, BillDefaults.PayTo),
+            await AppSettings.GetAsync(BillDefaults.PayAppKey, BillDefaults.PayApp));
+
+        var entry = await AppSettings.GetEntryAsync(BillDefaults.UpiIdKey);
+        defaultsSavedAt = entry?.ModifiedAtUtc;
+        defaultsSavedBy = entry?.ModifiedBy;
+    }
+
+    // ---- "make this the default UPI ID?" prompt (owner only) ----
+    private bool askUpiDefault;
+    private string? upiAnswered;   // don't ask twice about the same UPI ID
+
+    /// <summary>When the owner leaves the UPI ID box with a new, valid ID, offer to make it the default.</summary>
+    private void UpiIdLeft()
+    {
+        var value = upiId.Trim();
+        askUpiDefault = isOwner
+            && UpiIdValid
+            && !string.Equals(value, defaults.UpiId, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(value, upiAnswered, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void KeepUpiForThisBill()
+    {
+        upiAnswered = upiId.Trim();
+        askUpiDefault = false;
+        defaultsMessage = "OK, this UPI ID is used for this bill only.";
+        defaultsMessageIsError = false;
+    }
+
+    private async Task MakeUpiDefaultAsync()
+    {
+        defaultsMessage = null;
+        var user = (await AuthenticationStateTask).User;
+        if (!user.IsInRole("Owner") || !UpiIdValid)
+        {
+            askUpiDefault = false;
+            return;
+        }
+
+        savingDefaults = true;
+        try
+        {
+            var value = upiId.Trim();
+            await AppSettings.SaveAsync(
+                new Dictionary<string, string> { [BillDefaults.UpiIdKey] = value },
+                user.FindFirstValue(ClaimTypes.Email) ?? user.Identity?.Name ?? "Owner");
+
+            await LoadDefaultsAsync();
+            upiAnswered = value;
+            askUpiDefault = false;
+            defaultsMessage = $"{value} is now the default UPI ID for new bills.";
+            defaultsMessageIsError = false;
+        }
+        catch (Exception)
+        {
+            defaultsMessage = "The default UPI ID could not be saved. Please try again.";
+            defaultsMessageIsError = true;
+        }
+        finally
+        {
+            savingDefaults = false;
+        }
+    }
+
+    private void UseSavedDefaults()
+    {
+        upiId = defaults.UpiId;
+        payeeName = defaults.PayeeName;
+        payTo = defaults.PayTo;
+        payApp = defaults.PayApp;
+        defaultsMessage = null;
+        askUpiDefault = false;
+    }
+
+    private async Task SaveDefaultsAsync()
+    {
+        defaultsMessage = null;
+
+        // Checked again here (not only by hiding the button): changing the UPI ID
+        // changes where doctors' money goes.
+        var user = (await AuthenticationStateTask).User;
+        if (!user.IsInRole("Owner"))
+        {
+            defaultsMessage = "Only the owner can change the default payment details.";
+            defaultsMessageIsError = true;
+            return;
+        }
+
+        if (!UpiIdValid)
+        {
+            defaultsMessage = "Fix the UPI ID before saving it as the default.";
+            defaultsMessageIsError = true;
+            return;
+        }
+
+        savingDefaults = true;
+        try
+        {
+            var current = CurrentPayment;
+            await AppSettings.SaveAsync(new Dictionary<string, string>
+            {
+                [BillDefaults.UpiIdKey] = current.UpiId,
+                [BillDefaults.PayeeNameKey] = string.IsNullOrWhiteSpace(current.PayeeName) ? BillDefaults.PayeeName : current.PayeeName,
+                [BillDefaults.PayToKey] = current.PayTo,
+                [BillDefaults.PayAppKey] = current.PayApp
+            }, user.FindFirstValue(ClaimTypes.Email) ?? user.Identity?.Name ?? "Owner");
+
+            await LoadDefaultsAsync();
+            UseSavedDefaults();
+            defaultsMessage = "Saved. New bills will use these payment details.";
+            defaultsMessageIsError = false;
+        }
+        catch (Exception)
+        {
+            defaultsMessage = "The defaults could not be saved. Please try again.";
+            defaultsMessageIsError = true;
+        }
+        finally
+        {
+            savingDefaults = false;
+        }
+    }
+
+    private bool UpiIdValid => UpiPayment.IsValidUpiId(upiId);
+
+    /// <summary>Short UPI note, e.g. "Bill Sep2026 DrAneesha" (apps show about 50 characters).</summary>
+    private string UpiNote
+    {
+        get
+        {
+            var doctor = SelectedDoctorName == "-" ? "" : SelectedDoctorName;
+            var period = filter.FromDate is { } from && filter.ToDate is { } to && from.Month == to.Month && from.Year == to.Year
+                ? from.ToString("MMMyyyy", CultureInfo.InvariantCulture)
+                : $"{filter.FromDate:ddMMM}-{filter.ToDate:ddMMMyy}";
+            return UpiPayment.CleanNote($"Bill {period} {doctor}");
+        }
+    }
+
+    private sealed record PayBox(UpiPayRequest Request, string UpiLink, string QrDataUri, string PageUrl);
+
+    private PayBox? payCache;
+
+    /// <summary>The QR code and links for this bill, or null when they should not show.</summary>
+    private PayBox? PayInfo
+    {
+        get
+        {
+            if (!showUpiPay || !generated || GrandTotal <= 0 || !UpiIdValid)
+            {
+                return null;
+            }
+
+            var request = new UpiPayRequest(
+                upiId.Trim(),
+                string.IsNullOrWhiteSpace(payeeName) ? UpiPayment.DefaultPayeeName : payeeName.Trim(),
+                Math.Round(GrandTotal, 2),
+                UpiNote);
+
+            if (payCache?.Request != request)
+            {
+                var link = UpiPayment.BuildLink(request);
+                payCache = new PayBox(
+                    request,
+                    link,
+                    UpiPayment.QrDataUri(link),
+                    Navigation.ToAbsoluteUri("/pay/" + PayLinks.CreateToken(request)).ToString());
+            }
+
+            return payCache;
+        }
+    }
+
+    private static readonly string[] PaymentApps = ["PhonePe", "Google Pay", "Paytm", "UPI", "Bank transfer", "Cash"];
+
+    private sealed class Adjustment
+    {
+        public Guid Id { get; } = Guid.NewGuid();
+        public string Description { get; set; } = "";
+        public string AmountText { get; set; } = "";
+    }
+
+    /// <summary>Adjustments that have a valid, non-zero amount (what the bill shows).</summary>
+    private IEnumerable<(string Description, decimal Amount)> ValidAdjustments =>
+        adjustments
+            .Select(a => (Description: string.IsNullOrWhiteSpace(a.Description) ? "Adjustment" : a.Description.Trim(), Amount: ParseAmount(a.AmountText)))
+            .Where(a => a.Amount is not null && a.Amount != 0)
+            .Select(a => (a.Description, a.Amount!.Value));
+
+    private decimal AdjustmentsTotal => ValidAdjustments.Sum(a => a.Amount);
+
+    private string PaymentCaption =>
+        string.IsNullOrWhiteSpace(payTo)
+            ? ""
+            : $"Please pay your bills to {payTo.Trim()}" + (string.IsNullOrWhiteSpace(payApp) ? "" : $" ({payApp})");
+
+    private void AddAdjustment(string description, string amountPrefix)
+    {
+        adjustments.Add(new Adjustment { Description = description, AmountText = amountPrefix });
+        optionsTab = "adjust";
+    }
+
+    /// <summary>"-500", "− 1,200.50", "₹500", "+300" → number; anything else → null.</summary>
+    private static decimal? ParseAmount(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var cleaned = text.Trim()
+            .Replace("\u2212", "-")   // proper minus sign
+            .Replace("\u2013", "-")   // en dash
+            .Replace("\u20b9", "")    // rupee sign
+            .Replace("Rs.", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("Rs", "", StringComparison.OrdinalIgnoreCase)
+            .Replace(",", "")
+            .Replace(" ", "");
+
+        if (cleaned is "-" or "+")
+        {
+            return null;
+        }
+
+        return decimal.TryParse(cleaned, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value)
+            ? Math.Round(value, 2)
+            : null;
+    }
+
+    private static string SignedMoney(decimal value) =>
+        value < 0 ? "\u2212 " + Money(Math.Abs(value)) : "+ " + Money(value);
+
+    private bool IsMonth(int offset)
+    {
+        var first = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(offset);
+        var last = first.AddMonths(1).AddDays(-1);
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        return filter.FromDate == first && filter.ToDate == (last > today ? today : last);
+    }
+
+    private void SetMonth(int offset)
+    {
+        var first = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(offset);
+        filter.FromDate = first;
+        var last = first.AddMonths(1).AddDays(-1);
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        filter.ToDate = last > today ? today : last;
+    }
+    private decimal subtotal;
+    private bool loading;
+    private bool generated;
+    private string? error;
+    private string? gstin;
+
+    private bool showCaseId = false;   // off by default
+    private bool showPatientName = false;   // off by default
+    private bool showWatermark = true;
+    private bool showTypeSummary = true;
+
+    private bool applyGst = false;
+    private decimal gstPercentage = 12;
+    private decimal GstAmount => applyGst ? Math.Round(subtotal * (gstPercentage / 100m), 2) : 0;
+
+    private decimal GrandTotal => subtotal + GstAmount + oldDue + AdjustmentsTotal;
+
+    // Computed property for Case Type Summary
+    private IEnumerable<(string Type, int Units, decimal Amount)> TypeSummaries
+    {
+        get
+        {
+            if (cases == null || !cases.Any()) return Array.Empty<(string, int, decimal)>();
+
+            return cases.Where(c => c.Lines != null)
+                        .SelectMany(c => c.Lines)
+                        .GroupBy(l => string.IsNullOrWhiteSpace(l.CaseTypeCode) ? "Unknown" : l.CaseTypeCode)
+                        .Select(g => (
+                            Type: g.Key,
+                            Units: g.Sum(l => l.Units),
+                            // Line Amount is already UnitRate x Units, so just add it up.
+                            Amount: g.Sum(l => l.Amount)
+                        ))
+                        .OrderBy(x => x.Type);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        currentUser = (await AuthenticationStateTask).User;
+        isOwner = currentUser.IsInRole("Owner");
+        await LoadDefaultsAsync();
+        UseSavedDefaults();
+
+        doctors = await DoctorService.GetAllAsync();
+
+        // Opened from Doctor Payments (doctor-bill?doc=12): pick the doctor and the
+        // usual billing month (last month in the first half of the month), then generate.
+        if (QueryDoc is { } doc && doctors.Any(d => d.DocId == doc))
+        {
+            filter.DocId = doc;
+            SetMonth(DateTime.Today.Day <= 15 ? -1 : 0);
+            await GenerateAsync();
+        }
+    }
+
+    private string SelectedDoctorName =>
+        doctors.FirstOrDefault(d => d.DocId == filter.DocId)?.DocName ?? "-";
+
+    private string PeriodLabel =>
+        filter.FromDate.HasValue && filter.ToDate.HasValue
+            ? $"{filter.FromDate:dd MMM yyyy} \u2013 {filter.ToDate:dd MMM yyyy}"
+            : "All dates";
+
+    /// <summary>e.g. DrAneesha_Bill_Sep2026 for a whole month, otherwise DrAneesha_Bill_01Sep2026-15Sep2026.</summary>
+    private string PdfFileName
+    {
+        get
+        {
+            var doctor = PdfKit.FileName(SelectedDoctorName);
+            if (filter.FromDate is { } from && filter.ToDate is { } to)
+            {
+                var wholeMonth = from.Day == 1
+                    && to.Year == from.Year && to.Month == from.Month
+                    && (to.Day == DateTime.DaysInMonth(to.Year, to.Month) || to == DateOnly.FromDateTime(DateTime.Today));
+                return wholeMonth
+                    ? $"{doctor}_Bill_{from:MMMyyyy}"
+                    : $"{doctor}_Bill_{from:ddMMMyyyy}-{to:ddMMMyyyy}";
+            }
+
+            return $"{doctor}_Bill";
+        }
+    }
+
+    private async Task GenerateAsync()
+    {
+        if (filter.DocId is null) return;
+
+        if (filter.FromDate > filter.ToDate)
+        {
+            error = "The 'From' date cannot be later than the 'To' date.";
+            return;
+        }
+
+        loading = true;
+        error = null;
+        generated = false;
+        try
+        {
+            var collected = new List<CaseListItem>();
+            filter.PageNumber = 1;
+
+            while (true)
+            {
+                var page = await CaseService.SearchAsync(filter);
+                collected.AddRange(page.Items);
+                if (!page.HasNextPage) break;
+                filter.PageNumber++;
+            }
+
+            cases = collected.OrderBy(c => c.CaseDate).ToList();
+            subtotal = cases.Sum(c => c.TotalAmount);
+            saveBillMessage = null;
+            await LoadLedgerInfoAsync(setOldDue: true);
+            generated = true;
+        }
+        catch (Exception)
+        {
+            error = "The bill could not be generated. Please try again.";
+        }
+        finally
+        {
+            filter.PageNumber = 1;
+            loading = false;
+        }
+    }
+
+    private Task ResetAsync()
+    {
+        filter.DocId = null;
+        filter.FromDate = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
+        filter.ToDate = DateOnly.FromDateTime(DateTime.Today);
+        oldDue = 0;
+        dueInfo = null;
+        dueError = null;
+        paymentsUpTo = DoctorLedgerStore.Today;
+        showDueBreakdown = true;
+        savedBill = null;
+        saveBillMessage = null;
+        adjustments.Clear();
+        note = DefaultNote;
+        payTo = defaults.PayTo;
+        payApp = defaults.PayApp;
+        showPaymentLine = false;
+        showUpiPay = true;
+        upiId = defaults.UpiId;
+        payeeName = defaults.PayeeName;
+        defaultsMessage = null;
+        askUpiDefault = false;
+        upiAnswered = null;
+        payCache = null;
+        optionsTab = "charges";
+        cases = [];
+        subtotal = 0;
+        generated = false;
+        error = null;
+        gstin = null;
+
+        showCaseId = false;
+        showPatientName = false;
+        showWatermark = true;
+        showTypeSummary = true;
+        applyGst = false;
+        gstPercentage = 12;
+
+        return Task.CompletedTask;
+    }
+
+    private async Task PrintAsync() => await JS.InvokeVoidAsync("print");
+
+    private bool downloading;
+    private string? downloadError;
+
+    /// <summary>Builds a real PDF on the server and saves it straight to Downloads.</summary>
+    private async Task DownloadPdfAsync()
+    {
+        if (downloading)
+        {
+            return;
+        }
+
+        downloading = true;
+        downloadError = null;
+        try
+        {
+            var model = new DoctorBillPdfModel
+            {
+                DoctorName = SelectedDoctorName,
+                PeriodLabel = PeriodLabel,
+                GeneratedAt = DateTime.Now,
+                Gstin = string.IsNullOrWhiteSpace(gstin) ? null : gstin.Trim(),
+                ShowCaseId = showCaseId,
+                ShowPatient = showPatientName,
+                ShowWatermark = showWatermark,
+                ShowTypeSummary = showTypeSummary,
+                ApplyGst = applyGst,
+                GstPercentage = gstPercentage,
+                GstAmount = GstAmount,
+                Subtotal = subtotal,
+                OldDue = oldDue,
+                DueBreakdown = ShowBreakdownRows ? new BillDueBreakdown(dueInfo!.PreviousBalance, dueInfo.ReceivedInWindow) : null,
+                Adjustments = ValidAdjustments.Select(a => new BillAdjustment(a.Description, a.Amount)).ToList(),
+                PaymentCaption = showPaymentLine && !string.IsNullOrWhiteSpace(PaymentCaption) ? PaymentCaption : null,
+                Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim(),
+                Upi = PayInfo is { } pay
+                    ? new BillUpi(pay.Request.UpiId, pay.Request.PayeeName, pay.Request.Note, pay.PageUrl, UpiPayment.QrPng(pay.UpiLink))
+                    : null,
+                GrandTotal = GrandTotal,
+                Cases = cases.Select(c => new BillCase(
+                    c.CaseId, c.CaseDate, c.PatientName, c.PatientRef, c.TotalAmount,
+                    c.Lines.Select(l => new BillLine(l.CaseTypeCode, l.Scope, l.Arch, l.UR, l.UL, l.LR, l.LL, l.Units, l.UnitRate)).ToList()))
+                    .ToList(),
+                TypeSummary = TypeSummaries.Select(t => new BillTypeSummary(t.Type, t.Units, t.Amount)).ToList()
+            };
+
+            // PDF building is CPU work: keep it off the UI connection thread.
+            var bytes = await Task.Run(() => DoctorBillPdf.Generate(model));
+
+            using var stream = new MemoryStream(bytes);
+            using var streamRef = new DotNetStreamReference(stream);
+            await JS.InvokeVoidAsync("downloadFileFromStream", PdfFileName + ".pdf", streamRef, "application/pdf");
+        }
+        catch (Exception)
+        {
+            downloadError = "The PDF could not be created. Please try again, or use Print and choose Save as PDF.";
+        }
+        finally
+        {
+            downloading = false;
+        }
+    }
+
+    private static string DisplayValue(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value;
+
+    private static string Money(decimal value) =>
+        "\u20b9" + value.ToString("N2", CultureInfo.GetCultureInfo("en-IN"));
+
+    private static string NumberToWords(decimal number)
+    {
+        if (number <= 0) return "Zero";
+
+        long amount = (long)Math.Floor(number);
+        if (amount == 0) return "Zero";
+
+        string words = "";
+
+        if ((amount / 10000000) > 0)
+        {
+            words += NumberToWordsHelper(amount / 10000000) + " Crore ";
+            amount %= 10000000;
+        }
+        if ((amount / 100000) > 0)
+        {
+            words += NumberToWordsHelper(amount / 100000) + " Lakh ";
+            amount %= 100000;
+        }
+        if ((amount / 1000) > 0)
+        {
+            words += NumberToWordsHelper(amount / 1000) + " Thousand ";
+            amount %= 1000;
+        }
+        if ((amount / 100) > 0)
+        {
+            words += NumberToWordsHelper(amount / 100) + " Hundred ";
+            amount %= 100;
+        }
+        if (amount > 0)
+        {
+            if (words != "") words += "and ";
+            words += NumberToWordsHelper(amount);
+        }
+        return words.Trim();
+    }
+
+    private static string NumberToWordsHelper(long number)
+    {
+        string[] unitsMap = { "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen" };
+        string[] tensMap = { "Zero", "Ten", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety" };
+
+        if (number < 20) return unitsMap[number];
+
+        string words = tensMap[number / 10];
+        if ((number % 10) > 0) words += "-" + unitsMap[number % 10];
+
+        return words;
+    }
+
+    private static string Badge(string code)
+    {
+        var colour = code switch
+        {
+            "CR" => "text-bg-primary",
+            "ZR" => "text-bg-success",
+            "DMLS" => "text-bg-info",
+            "IMP_DMLS" => "text-bg-warning",
+            "DENTURE" => "text-bg-danger",
+            "RETAINER" => "text-bg-teal",
+            _ => "text-bg-secondary"
+        };
+        return $"badge case-badge {colour}";
+    }
+}

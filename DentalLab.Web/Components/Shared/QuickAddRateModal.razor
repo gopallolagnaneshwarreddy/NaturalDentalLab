@@ -1,0 +1,485 @@
+﻿@*
+    Pop-up to add a case-type rate for one doctor without leaving the page (Owner only).
+    Lists the case types the doctor does not have a rate for yet.
+    Raises OnSaved with the CaseTypeId so the page can select it straight away.
+*@
+@using DentalLab.Application.Abstractions
+@using DentalLab.Domain.Entities
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Text.RegularExpressions
+@using Microsoft.EntityFrameworkCore
+
+@inject PermissionStore Permissions
+@inject IDoctorRateService DoctorRateService
+@inject ICaseTypeService CaseTypeService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+@if (Visible)
+{
+    <div class="qa-backdrop" @onclick="CancelAsync"></div>
+    <div class="qa-modal" role="dialog" aria-modal="true" aria-labelledby="qaRateTitle">
+        <div class="qa-header">
+            <div>
+                <h5 id="qaRateTitle" class="mb-0">@(createNew ? "New case type + rate" : "Add case-type rate")</h5>
+                <div class="small text-muted">for @DocName</div>
+            </div>
+            <button type="button" class="btn-close" aria-label="Close" @onclick="CancelAsync"></button>
+        </div>
+
+        <div class="qa-body">
+            @if (loading)
+            {
+                <p class="mb-0">Loading case types...</p>
+            }
+            else
+            {
+                <div class="btn-group w-100 mb-3" role="group" aria-label="Case type source">
+                    <button type="button"
+                            class="btn btn-sm @(createNew ? "btn-outline-primary" : "btn-primary")"
+                            disabled="@(available.Count == 0)"
+                            @onclick="UseExisting">
+                        Existing case type
+                    </button>
+                    <button type="button"
+                            class="btn btn-sm @(createNew ? "btn-primary" : "btn-outline-primary")"
+                            @onclick="() => StartNewCaseType(search)">
+                        &#43; New case type
+                    </button>
+                </div>
+
+                @if (!createNew)
+                {
+                    <label class="form-label">Case type <span class="text-danger">*</span></label>
+                    <input @ref="firstInput" class="form-control mb-2"
+                           placeholder="Type to search code or name..."
+                           @bind="search" @bind:event="oninput"
+                           @onkeydown="OnKeyDownAsync" />
+
+                    <div class="qa-pick-list">
+                        @{
+                            var filtered = Filtered;
+                        }
+                        @if (filtered.Count == 0)
+                        {
+                            <div class="qa-pick-none">No case types match "@search"</div>
+                        }
+                        @foreach (var caseType in filtered)
+                        {
+                            var item = caseType;
+                            <button type="button"
+                                    class="qa-pick @(item.CaseTypeId == selectedCaseTypeId ? "selected" : "")"
+                                    @onclick="() => Pick(item)">
+                                <strong>@item.CaseTypeCode</strong> &ndash; @item.CaseTypeName
+                                <span class="badge bg-light text-dark ms-1">@(item.Scope == 'A' ? "per arch" : "per tooth")</span>
+                            </button>
+                        }
+                        <button type="button" class="qa-pick qa-pick-create" @onclick="() => StartNewCaseType(search)">
+                            &#43; Case type not found? Create
+                            @if (!string.IsNullOrWhiteSpace(search))
+                            {
+                                <strong>&ldquo;@search.Trim()&rdquo;</strong>
+                            }
+                            as a new case type
+                        </button>
+                    </div>
+                }
+                else
+                {
+                    <div class="small text-muted mb-2">
+                        The new case type is added to the master list and this doctor gets the rate below.
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-sm-5">
+                            <label class="form-label">Code <span class="text-danger">*</span></label>
+                            <input @ref="newCodeInput" class="form-control text-uppercase" maxlength="20"
+                                   placeholder="e.g. ZRC"
+                                   @bind="newCode" @bind:event="oninput" @onkeydown="OnKeyDownAsync" />
+                        </div>
+                        <div class="col-sm-7">
+                            <label class="form-label">Name <span class="text-danger">*</span></label>
+                            <input class="form-control" maxlength="100"
+                                   placeholder="e.g. Zirconia crown"
+                                   @bind="newName" @bind:event="oninput" @onkeydown="OnKeyDownAsync" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label d-block">Charged</label>
+                            <button type="button"
+                                    class="btn btn-sm me-2 @(newScope == 'T' ? "btn-primary" : "btn-outline-primary")"
+                                    @onclick="() => newScope = 'T'">Per tooth</button>
+                            <button type="button"
+                                    class="btn btn-sm @(newScope == 'A' ? "btn-primary" : "btn-outline-primary")"
+                                    @onclick="() => newScope = 'A'">Whole arch</button>
+                        </div>
+                    </div>
+                }
+
+                <div class="row g-3 mt-1">
+                    <div class="col-sm-6">
+                        <label class="form-label">Rate (cost per unit) <span class="text-danger">*</span></label>
+                        <input type="number" class="form-control" min="0" max="999999" step="0.01"
+                               @bind="cost" @bind:event="oninput" @onkeydown="OnKeyDownAsync" />
+                    </div>
+                    <div class="col-sm-6 d-flex align-items-end">
+                        <div class="small text-muted">
+                            @if (createNew)
+                            {
+                                <span>New: <strong>@(string.IsNullOrWhiteSpace(newCode) ? "-" : newCode.Trim().ToUpperInvariant())</strong> @newName</span>
+                            }
+                            else if (selected is null)
+                            {
+                                <span>Pick a case type above.</span>
+                            }
+                            else
+                            {
+                                <span>Selected: <strong>@selected.CaseTypeCode</strong> - @selected.CaseTypeName</span>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (error is not null)
+            {
+                <div class="alert alert-danger mt-3 mb-0">@error</div>
+            }
+        </div>
+
+        <div class="qa-footer">
+            <button type="button" class="btn btn-outline-secondary" disabled="@saving" @onclick="CancelAsync">Cancel</button>
+            <button type="button" class="btn btn-primary" disabled="@(saving || loading)" @onclick="SaveAsync">
+                @(saving ? "Saving..." : "Save rate")
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public int DocId { get; set; }
+
+    [Parameter] public string DocName { get; set; } = string.Empty;
+
+    /// <summary>Raised with the CaseTypeId of the new rate.</summary>
+    [Parameter] public EventCallback<int> OnSaved { get; set; }
+
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private bool wasVisible;
+    private bool focusPending;
+    private ElementReference firstInput;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusNewCode && Visible && createNew && newCodeInput.Context is not null)
+        {
+            focusNewCode = false;
+            focusPending = false;
+            try
+            {
+                await newCodeInput.FocusAsync();
+            }
+            catch
+            {
+            }
+            return;
+        }
+
+        if (focusPending && Visible && firstInput.Context is not null)
+        {
+            focusPending = false;
+            try
+            {
+                await firstInput.FocusAsync();
+            }
+            catch
+            {
+                // Element may not be rendered yet (e.g. still loading); ignore.
+            }
+        }
+    }
+    private bool loading;
+    private bool saving;
+    private string? error;
+    private string search = string.Empty;
+    private List<CaseType> available = [];
+    private CaseType? selected;
+    private int selectedCaseTypeId;
+    private decimal? cost;
+
+    // "New case type" mode
+    private static readonly Regex CodePattern = new("^[A-Za-z0-9 _-]+$", RegexOptions.Compiled);
+    private bool createNew;
+    private string newCode = string.Empty;
+    private string newName = string.Empty;
+    private char newScope = 'T';
+    private ElementReference newCodeInput;
+    private bool focusNewCode;
+
+    private List<CaseType> Filtered
+    {
+        get
+        {
+            var tokens = search.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return available
+                .Where(ct => tokens.All(t =>
+                    (ct.CaseTypeCode ?? string.Empty).Contains(t, StringComparison.OrdinalIgnoreCase)
+                    || (ct.CaseTypeName ?? string.Empty).Contains(t, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Visible && !wasVisible)
+        {
+            wasVisible = true;
+            search = string.Empty;
+            selected = null;
+            selectedCaseTypeId = 0;
+            cost = null;
+            error = null;
+            saving = false;
+            loading = true;
+            createNew = false;
+            newCode = string.Empty;
+            newName = string.Empty;
+            newScope = 'T';
+
+            try
+            {
+                var list = await DoctorRateService.GetAvailableCaseTypesAsync(DocId);
+                available = list
+                    .Where(ct => ct.IsActive)
+                    .OrderBy(ct => ct.DisplayOrder)
+                    .ThenBy(ct => ct.CaseTypeCode)
+                    .ToList();
+            }
+            catch (Exception exception)
+            {
+                available = [];
+                error = exception.Message;
+            }
+            finally
+            {
+                loading = false;
+                focusPending = true;
+            }
+
+            if (available.Count == 0 && error is null)
+            {
+                StartNewCaseType(string.Empty);
+            }
+        }
+        else if (!Visible)
+        {
+            wasVisible = false;
+        }
+    }
+
+    private void UseExisting()
+    {
+        createNew = false;
+        error = null;
+        focusPending = true;
+    }
+
+    /// <summary>Switch to "new case type" mode, prefilling from what was typed in the search.</summary>
+    private void StartNewCaseType(string? typed)
+    {
+        createNew = true;
+        error = null;
+        selected = null;
+        selectedCaseTypeId = 0;
+
+        var text = (typed ?? string.Empty).Trim();
+        if (text.Length > 0 && string.IsNullOrWhiteSpace(newName) && string.IsNullOrWhiteSpace(newCode))
+        {
+            // Short single word (e.g. "ZRC") looks like a code; anything else is a name.
+            if (!text.Contains(' ') && text.Length <= 8 && CodePattern.IsMatch(text))
+            {
+                newCode = text.ToUpperInvariant();
+            }
+            else
+            {
+                newName = text;
+            }
+        }
+
+        focusNewCode = true;
+    }
+
+    private void Pick(CaseType caseType)
+    {
+        selected = caseType;
+        selectedCaseTypeId = caseType.CaseTypeId;
+        error = null;
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            if (createNew)
+            {
+                await SaveAsync();
+                return;
+            }
+
+            // Enter in the search box picks the only / first match.
+            if (selected is null)
+            {
+                var first = Filtered.FirstOrDefault();
+                if (first is not null)
+                {
+                    Pick(first);
+                    return;
+                }
+            }
+
+            await SaveAsync();
+        }
+        else if (args.Key == "Escape")
+        {
+            await CancelAsync();
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        if (!saving)
+        {
+            await OnCancel.InvokeAsync();
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (saving)
+        {
+            return;
+        }
+
+        error = null;
+
+        if (!createNew && selected is null)
+        {
+            error = "Select a case type, or switch to \"New case type\".";
+            return;
+        }
+
+        var code = newCode.Trim().ToUpperInvariant();
+        var name = newName.Trim();
+
+        if (createNew)
+        {
+            if (code.Length == 0 || code.Length > 20 || !CodePattern.IsMatch(code))
+            {
+                error = "Code is required: letters, numbers, space, _ or - (max 20).";
+                return;
+            }
+
+            if (name.Length == 0 || name.Length > 100)
+            {
+                error = "Name is required (max 100 characters).";
+                return;
+            }
+        }
+
+        if (cost is null || cost < 0 || cost > 999999)
+        {
+            error = "Enter a rate between 0 and 999999.";
+            return;
+        }
+
+        // Server-side guard: only the Owner may add case types / rates from here.
+        var user = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
+        if (!Permissions.IsAllowed(user, Perm.QuickAddRate))
+        {
+            error = "You do not have permission to add case types or rates.";
+            return;
+        }
+
+        saving = true;
+        try
+        {
+            int caseTypeId;
+
+            if (createNew)
+            {
+                CaseType created;
+                try
+                {
+                    created = await CreateCaseTypeAsync(code, name, newScope);
+                }
+                catch (DbUpdateException)
+                {
+                    error = "A case type with that code or name already exists. Switch to \"Existing case type\" and search for it.";
+                    return;
+                }
+
+                caseTypeId = created.CaseTypeId;
+
+                // Keep it in the list, so if the rate step fails the user can retry from "Existing".
+                available.Add(created);
+                selected = created;
+                selectedCaseTypeId = created.CaseTypeId;
+                createNew = false;
+            }
+            else
+            {
+                caseTypeId = selected!.CaseTypeId;
+            }
+
+            try
+            {
+                await DoctorRateService.CreateAsync(new DoctorRate
+                {
+                    DocId = DocId,
+                    CaseTypeId = caseTypeId,
+                    Cost = cost.Value,
+                    IsActive = true
+                });
+            }
+            catch (DbUpdateException)
+            {
+                error = "This doctor already has a rate for that case type (it may be inactive). Re-enable it on the doctor's rates page.";
+                return;
+            }
+
+            await OnSaved.InvokeAsync(caseTypeId);
+        }
+        catch (InvalidOperationException exception)
+        {
+            error = exception.Message;
+        }
+        catch (Exception)
+        {
+            error = "Could not be saved. Please try again.";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task<CaseType> CreateCaseTypeAsync(string code, string name, char scope)
+    {
+        var order = await CaseTypeService.GetNextSequentialOrderAsync();
+
+        var newId = await CaseTypeService.CreateAsync(new CaseType
+        {
+            CaseTypeCode = code,
+            CaseTypeName = name,
+            Scope = scope,
+            DisplayOrder = order,
+            IsActive = true
+        });
+
+        // Re-read to get the saved record with its real id.
+        var all = await CaseTypeService.GetAllAsync();
+        return all.FirstOrDefault(ct => newId > 0 && ct.CaseTypeId == newId)
+            ?? all.FirstOrDefault(ct => string.Equals(ct.CaseTypeCode, code, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("The case type was created but could not be loaded. Refresh the page.");
+    }
+}

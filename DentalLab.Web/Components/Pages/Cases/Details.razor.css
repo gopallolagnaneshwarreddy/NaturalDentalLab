@@ -1,0 +1,105 @@
+.case-details-page {
+    width: 100%;
+    min-width: 0;
+}
+
+.case-details-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.85rem;
+    border-bottom: 1px solid var(--line, #e7e2d6);
+}
+
+.case-details-eyebrow {
+    display: block;
+    margin-bottom: 0.2rem;
+    font-family: var(--font-heading, inherit);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--brand, #0f766e);
+}
+
+.case-details-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    flex-shrink: 0;
+}
+
+.case-summary-card {
+    border-radius: var(--radius-md, 12px);
+    box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, .05));
+}
+
+.case-summary-label {
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted, #6b7280);
+    margin-bottom: 0.15rem;
+}
+
+.case-summary-value { font-weight: 600; }
+
+.case-details-table-wrapper {
+    border: 1px solid var(--line, #e7e2d6);
+    border-radius: var(--radius-md, 12px);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, .05));
+}
+
+.case-details-table { margin-bottom: 0; }
+
+.case-details-table thead th {
+    font-family: var(--font-heading, inherit);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #6b6355;
+    background-color: var(--paper, #f7f5f0);
+}
+
+.case-details-table tfoot th {
+    background-color: var(--paper, #f7f5f0);
+}
+
+/* ---------- Print: fit a single case sheet onto A4 ---------- */
+@media print {
+    @page {
+        size: A4;
+        margin: 14mm;
+    }
+
+    body { background: #fff !important; }
+
+    .case-details-heading { border-bottom: 2px solid #000; }
+    .case-details-eyebrow { color: #000 !important; }
+
+    .case-summary-card,
+    .case-details-table-wrapper {
+        border: none;
+        box-shadow: none;
+        border-radius: 0;
+    }
+
+    .case-details-table {
+        width: 100% !important;
+        font-size: 11px;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    .case-details-table thead th,
+    .case-details-table tfoot th {
+        background-color: #f0efe9 !important;
+        color: #000 !important;
+    }
+}

@@ -1,0 +1,411 @@
+﻿@page "/cases/bulk/by-doctor"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.CasesBulkEntry)]
+
+@using System.Security.Claims
+@using DentalLab.Application.Abstractions
+@using DentalLab.Application.Models
+@using DentalLab.Application.Models.Cases
+@using DentalLab.Domain.Entities
+@using DentalLab.Web.Components.Shared
+@using Microsoft.AspNetCore.Authorization
+
+@inject PermissionStore Permissions
+@inject IDoctorService DoctorService
+@inject IDoctorRateService DoctorRateService
+@inject ICaseService CaseService
+
+<PageTitle>Multiple Cases - By Doctor</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h3 class="mb-1">Multiple Cases &mdash; One Doctor</h3>
+        <p class="text-muted mb-0">Pick the doctor first, then add as many cases as you need, each with its own date.</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" href="/cases/bulk/by-date">By date instead</a>
+        <a class="btn btn-outline-secondary" href="/cases">View cases</a>
+    </div>
+</div>
+
+@* ---------- Step 1: doctor ---------- *@
+<div class="card mb-4">
+    <div class="card-header"><span class="badge bg-primary me-2">1</span>Doctor</div>
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-sm-8 col-lg-4">
+                <label class="form-label">Doctor for all cases in this batch</label>
+                <DoctorSearchSelect TItem="Doctor"
+                                    Items="doctors"
+                                    IdOf="d => d.DocId"
+                                    NameOf="d => d.DocName"
+                                    Value="@(docId == 0 ? (int?)null : docId)"
+                                    ValueChanged="DoctorChangedAsync"
+                                    Disabled="@(saving || batch.Count > 0 || draft.Lines.Count > 0)"
+                                    CanAdd="canAddDoctor"
+                                    OnAddNew="OpenAddDoctor" />
+            </div>
+            @if (batch.Count > 0 || draft.Lines.Count > 0)
+            {
+                <div class="col">
+                    <div class="form-text">Save or remove the cases in the batch (and clear the current case) to change the doctor.</div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@if (docId == 0)
+{
+    <div class="alert alert-info">Select a doctor to start adding cases.</div>
+}
+else if (ratesLoading)
+{
+    <p>Loading the doctor's case types...</p>
+}
+else
+{
+    @* ---------- Step 2: add a case ---------- *@
+    <div class="card mb-4">
+        <div class="card-header"><span class="badge bg-primary me-2">2</span>Add a case for @docName</div>
+        <div class="card-body">
+            <div class="row g-3 mb-3">
+                <div class="col-lg-3">
+                    <label class="form-label">Case date</label>
+                    <input type="date" class="form-control" @bind="draft.CaseDate" max="@TodayText" />
+                </div>
+                <div class="col-lg-5">
+                    <label class="form-label">Patient name</label>
+                    <input class="form-control" @bind="draft.PatientName" />
+                </div>
+                <div class="col-lg-4">
+                    <label class="form-label">Patient reference</label>
+                    <input class="form-control" @bind="draft.PatientRef" />
+                </div>
+            </div>
+
+            <CaseLineBuilder Rates="currentRates" Lines="draft.Lines" CanSeePrices="canSeePrices"
+                             OnLinesChanged="() => draftErrors.Clear()"
+                             CanAddRate="canAddRate"
+                             DocId="docId"
+                             DocName="@docName"
+                             OnRateAdded="RateAddedAsync" />
+
+            <div class="mt-3">
+                <label class="form-label">Notes</label>
+                <textarea class="form-control" rows="2" @bind="draft.Notes"></textarea>
+            </div>
+
+            @if (draftErrors.Count > 0)
+            {
+                <div class="alert alert-danger mt-3 mb-0">
+                    @foreach (var error in draftErrors)
+                    {
+                        <div>@error</div>
+                    }
+                </div>
+            }
+
+            <div class="d-flex justify-content-end gap-2 mt-3">
+                <button type="button" class="btn btn-outline-secondary" @onclick="ResetDraft">Clear</button>
+                <button type="button" class="btn btn-primary" @onclick="AddDraftToBatch">Add case to batch</button>
+            </div>
+        </div>
+    </div>
+
+    @* ---------- Step 3: batch ---------- *@
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><span class="badge bg-primary me-2">3</span>Cases in this batch</span>
+            <span class="badge bg-secondary">@batch.Count</span>
+        </div>
+        <div class="card-body">
+            @if (batch.Count == 0)
+            {
+                <div class="text-muted">No cases in the batch yet.</div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Date</th>
+                                <th>Patient</th>
+                                <th>Lines</th>
+                                <th class="text-end">Units</th>
+                                @if (canSeePrices)
+                                {
+                                    <th class="text-end">Amount</th>
+                                }
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (var i = 0; i < batch.Count; i++)
+                            {
+                                var item = batch[i];
+                                var rowNumber = i + 1;
+                                <tr @key="item.DraftId" class="@(item.SaveError is null ? "" : "table-danger")">
+                                    <td>@rowNumber</td>
+                                    <td class="text-nowrap">@item.CaseDate?.ToString("dd MMM yyyy")</td>
+                                    <td>
+                                        @item.PatientName
+                                        @if (!string.IsNullOrWhiteSpace(item.PatientRef))
+                                        {
+                                            <div class="small text-muted">Ref: @item.PatientRef</div>
+                                        }
+                                    </td>
+                                    <td class="small">
+                                        @item.LinesSummary
+                                        @if (item.SaveError is not null)
+                                        {
+                                            <div class="text-danger fw-semibold">@item.SaveError</div>
+                                        }
+                                    </td>
+                                    <td class="text-end">@item.TotalUnits</td>
+                                    @if (canSeePrices)
+                                    {
+                                        <td class="text-end">@item.TotalAmount.ToString("N2")</td>
+                                    }
+                                    <td class="text-end">
+                                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@saving"
+                                                @onclick="() => RemoveFromBatch(item.DraftId)">Remove</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                        <tfoot>
+                            <tr class="fw-semibold">
+                                <td colspan="4">Total (@batch.Count cases, @batch.Select(b => b.CaseDate).Distinct().Count() date(s))</td>
+                                <td class="text-end">@batch.Sum(b => b.TotalUnits)</td>
+                                @if (canSeePrices)
+                                {
+                                    <td class="text-end">@batch.Sum(b => b.TotalAmount).ToString("N2")</td>
+                                }
+                                <td></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(saveMessage))
+            {
+                <div class="alert alert-success mt-3">
+                    @saveMessage <a href="/cases">View cases</a>
+                </div>
+            }
+            @if (!string.IsNullOrWhiteSpace(saveError))
+            {
+                <div class="alert alert-danger mt-3">@saveError</div>
+            }
+
+            <div class="mt-3">
+                <button type="button" class="btn btn-success" disabled="@(saving || batch.Count == 0)" @onclick="SaveAllAsync">
+                    @(saving ? $"Saving {savedSoFar}/{batchSizeAtSave}..." : $"Save all {batch.Count} case(s)")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<QuickAddDoctorModal Visible="addDoctorOpen"
+                     InitialName="@addDoctorName"
+                     OnSaved="DoctorAddedAsync"
+                     OnCancel="() => addDoctorOpen = false" />
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+
+    private List<Doctor> doctors = [];
+    private List<DoctorRateListItem> currentRates = [];
+
+    private int docId;
+    private string docName = string.Empty;
+    private BulkCaseDraft draft = new();
+    private readonly List<BulkCaseDraft> batch = [];
+    private List<string> draftErrors = [];
+
+    private bool ratesLoading;
+    private bool saving;
+    private int savedSoFar;
+    private int batchSizeAtSave;
+    private string? saveMessage;
+    private string? saveError;
+
+    private string TodayText => DateTime.Today.ToString("yyyy-MM-dd");
+
+    // Same rules as the single New Case page:
+    // prices (rates / amounts) for Owner and Admin only, never Staff;
+    // quick-add of doctors / case types / rates for the Owner only.
+    private bool canSeePrices;
+    private bool canAddDoctor;
+    private bool canAddRate;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthenticationStateTask).User;
+        canSeePrices = Permissions.IsAllowed(user, Perm.CasesViewPrices);
+        canAddDoctor = Permissions.IsAllowed(user, Perm.QuickAddDoctor);
+        canAddRate = Permissions.IsAllowed(user, Perm.QuickAddRate);
+
+        doctors = await DoctorService.GetAllAsync();
+    }
+
+    private async Task DoctorChangedAsync(int? selectedId)
+    {
+        docId = selectedId ?? 0;
+        docName = doctors.FirstOrDefault(d => d.DocId == docId)?.DocName ?? string.Empty;
+        currentRates = [];
+        ResetDraft();
+
+        if (docId == 0)
+        {
+            return;
+        }
+
+        ratesLoading = true;
+        try
+        {
+            currentRates = await DoctorRateService.GetForDoctorAsync(docId);
+        }
+        finally
+        {
+            ratesLoading = false;
+        }
+    }
+
+    // ---- Owner quick-add: doctor ----
+    private bool addDoctorOpen;
+    private string? addDoctorName;
+
+    private void OpenAddDoctor(string typedName)
+    {
+        addDoctorName = typedName;
+        addDoctorOpen = true;
+    }
+
+    private async Task DoctorAddedAsync(Doctor doctor)
+    {
+        addDoctorOpen = false;
+        doctors = await DoctorService.GetAllAsync();
+        await DoctorChangedAsync(doctor.DocId);
+    }
+
+    // ---- Owner quick-add: case-type rate ----
+    private async Task RateAddedAsync(int caseTypeId)
+    {
+        if (docId != 0)
+        {
+            currentRates = await DoctorRateService.GetForDoctorAsync(docId);
+        }
+    }
+
+    private void AddDraftToBatch()
+    {
+        saveMessage = null;
+        draftErrors = [];
+
+        if (draft.CaseDate is null)
+        {
+            draftErrors.Add("Select a case date.");
+            return;
+        }
+
+        draftErrors = BulkCaseDraft.Validate(draft.ToRequest(draft.CaseDate.Value));
+        if (draftErrors.Count > 0)
+        {
+            return;
+        }
+
+        batch.Add(draft);
+
+        // Keep the last date: consecutive cases are often on the same or next day.
+        var lastDate = draft.CaseDate;
+        ResetDraft();
+        draft.CaseDate = lastDate;
+    }
+
+    private void ResetDraft()
+    {
+        draft = new BulkCaseDraft
+        {
+            DocId = docId,
+            DocName = docName,
+            CaseDate = DateOnly.FromDateTime(DateTime.Today)
+        };
+        draftErrors = [];
+    }
+
+    private void RemoveFromBatch(Guid draftId)
+    {
+        batch.RemoveAll(b => b.DraftId == draftId);
+    }
+
+    private async Task SaveAllAsync()
+    {
+        if (docId == 0 || batch.Count == 0)
+        {
+            return;
+        }
+
+        saving = true;
+        saveMessage = null;
+        saveError = null;
+        savedSoFar = 0;
+        batchSizeAtSave = batch.Count;
+
+        var savedIds = new List<string>();
+
+        try
+        {
+            var user = (await AuthenticationStateTask).User;
+            var createdBy = user.FindFirstValue(ClaimTypes.Email) ?? user.Identity?.Name ?? string.Empty;
+
+            foreach (var item in batch.ToList())
+            {
+                item.SaveError = null;
+                try
+                {
+                    var result = await CaseService.CreateAsync(item.ToRequest(item.CaseDate!.Value), createdBy);
+                    if (result.Succeeded)
+                    {
+                        savedIds.Add(result.CaseId?.ToString() ?? "?");
+                        batch.Remove(item);
+                    }
+                    else
+                    {
+                        item.SaveError = result.ErrorMessage ?? "Save failed.";
+                    }
+                }
+                catch (Exception exception)
+                {
+                    item.SaveError = exception.Message;
+                }
+
+                savedSoFar++;
+                StateHasChanged();
+            }
+        }
+        catch (Exception exception)
+        {
+            saveError = exception.Message;
+        }
+        finally
+        {
+            saving = false;
+        }
+
+        if (savedIds.Count > 0)
+        {
+            saveMessage = $"Saved {savedIds.Count} case(s): #{string.Join(", #", savedIds)}.";
+        }
+        if (batch.Count > 0)
+        {
+            saveError ??= $"{batch.Count} case(s) could not be saved and are still in the batch (marked in red). Fix and save again.";
+        }
+    }
+}

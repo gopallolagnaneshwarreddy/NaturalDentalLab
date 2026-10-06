@@ -1,0 +1,10 @@
+<div class="empty-state">
+    <div class="empty-symbol">◇</div>
+    <strong>@Title</strong>
+    <span>@Text</span>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string Text { get; set; } = string.Empty;
+}

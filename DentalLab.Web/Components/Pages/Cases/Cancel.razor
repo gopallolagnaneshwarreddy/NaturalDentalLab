@@ -1,0 +1,21 @@
+﻿@page "/cases/{CaseId:int}/cancel"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.CasesCancel)]
+@using System.Security.Claims
+@using DentalLab.Application.Abstractions
+@using DentalLab.Application.Models.Cases
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@inject ICaseService CaseService
+@inject NavigationManager Nav
+<PageTitle>Cancel Case</PageTitle>
+<h3>Cancel Case @CaseId</h3>
+<div class="alert alert-warning">Cancellation does not delete records. The case remains available for audit.</div>
+<EditForm Model="model" OnValidSubmit="CancelAsync" FormName="cancelCaseForm"><DataAnnotationsValidator /><div style="max-width:700px"><label class="form-label">Reason</label><InputTextArea class="form-control" rows="4" @bind-Value="model.Reason" /><ValidationMessage For="() => model.Reason" />@if(error is not null){
+    <div class="alert alert-danger mt-3">@error</div>
+}
+<div class="mt-3"><button class="btn btn-danger" disabled="@saving">@(saving ? "Cancelling..." : "Confirm cancellation")</button><a class="btn btn-link" href="@($"/cases/{CaseId}")">Back</a></div></div></EditForm>
+@code {
+    [Parameter] public int CaseId { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!; private readonly CancelCaseRequest model = new(); private bool saving; private string? error; private async Task CancelAsync() { saving = true; error = null; try { var state = await AuthenticationStateTask; var user = state.User.FindFirstValue(ClaimTypes.Email) ?? state.User.Identity?.Name ?? ""; var result = await CaseService.CancelAsync(CaseId, model.Reason, user); if (!result.Succeeded) { error = result.ErrorMessage; return; } Nav.NavigateTo($"/cases?cancelled={CaseId}"); } finally { saving = false; } }
+}

@@ -1,0 +1,1018 @@
+@page "/doctor-payments"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.PaymentsView)]
+
+@using System.Globalization
+@using System.Security.Claims
+@using DentalLab.Application.Abstractions
+@using DentalLab.Domain.Entities
+@using DentalLab.Web.Components.Shared
+@using DentalLab.Web.Ledger
+@using Microsoft.AspNetCore.Authorization
+
+@inject IDoctorService DoctorService
+@inject DoctorLedgerStore Ledger
+@inject PermissionStore Permissions
+@inject IJSRuntime JS
+
+<PageTitle>Doctor Payments</PageTitle>
+
+<div class="payments-page">
+    <div class="pp-heading">
+        <div>
+            <h3 class="mb-1">Doctor Payments</h3>
+            <p class="text-muted mb-0">Record what each doctor pays, in full or in part. Whatever is still pending goes to their next bill as <strong>Old due</strong> automatically.</p>
+        </div>
+        <span class="pp-since" title="Work and payments from this date are counted. Anything pending before it is entered as an opening balance.">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="16" rx="2"/><path d="M3.5 9h17M8 3v3M16 3v3"/></svg>
+            Tracking dues since <strong>@startDate.ToString("dd MMM yyyy")</strong>
+        </span>
+    </div>
+
+    @if (Ledger.StartupError is not null)
+    {
+        <div class="alert alert-danger">@Ledger.StartupError</div>
+    }
+
+    @if (loadError is not null)
+    {
+        <div class="alert alert-danger">@loadError</div>
+    }
+
+    @if (loading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border spinner-border-sm" role="status" aria-label="Loading"></div>
+            <span class="ms-2">Loading dues&hellip;</span>
+        </div>
+    }
+    else
+    {
+        @* ---------------- Totals ---------------- *@
+        <div class="pp-stats">
+            <div class="pp-stat pp-stat-due">
+                <span class="pp-stat-label">Pending from bills</span>
+                <strong class="pp-stat-value">@Money(TotalPending)</strong>
+                <span class="pp-stat-sub">@Plural(DoctorsWithDues, "doctor") yet to pay in full</span>
+            </div>
+            <div class="pp-stat">
+                <span class="pp-stat-label">Work this month</span>
+                <strong class="pp-stat-value">@Money(dues.Sum(d => d.ChargesThisMonth))</strong>
+                <span class="pp-stat-sub">@DateTime.Today.ToString("MMMM") &middot; not billed yet</span>
+            </div>
+            <div class="pp-stat pp-stat-paid">
+                <span class="pp-stat-label">Received this month</span>
+                <strong class="pp-stat-value">@Money(ReceivedThisMonth)</strong>
+                <span class="pp-stat-sub">@Plural(PaymentsThisMonth, "payment")</span>
+            </div>
+            <div class="pp-stat">
+                <span class="pp-stat-label">Total outstanding</span>
+                <strong class="pp-stat-value">@Signed(dues.Sum(d => d.TotalBalance))</strong>
+                <span class="pp-stat-sub">pending bills + this month&rsquo;s work</span>
+            </div>
+        </div>
+
+        <div class="pp-grid">
+            @* ---------------- Record a payment ---------------- *@
+            <section class="card pp-card" aria-labelledby="ppRecordTitle">
+                <div class="pp-card-head">
+                    <h5 id="ppRecordTitle">Record a payment</h5>
+                    @if (!canRecord)
+                    {
+                        <span class="pp-pill">View only</span>
+                    }
+                </div>
+                <div class="pp-card-body">
+                    <div class="pp-field">
+                        <label class="form-label">Doctor</label>
+                        <DoctorSearchSelect TItem="Doctor"
+                                            Items="doctors"
+                                            IdOf="d => d.DocId"
+                                            NameOf="@(d => d.IsActive ? d.DocName : d.DocName + " (inactive)")"
+                                            @bind-Value="selectedDocId"
+                                            @bind-Value:after="DoctorChangedAsync"
+                                            Placeholder="Search a doctor" />
+                    </div>
+
+                    @if (SelectedDue is { } due)
+                    {
+                        <div class="pp-duebox">
+                            <div>
+                                <span>Pending from bills</span>
+                                <strong class="@(due.PendingFromBills > 0 ? "is-due" : "is-clear")">@Signed(due.PendingFromBills)</strong>
+                            </div>
+                            <div>
+                                <span>This month so far</span>
+                                <strong>@Money(due.ChargesThisMonth)</strong>
+                            </div>
+                            <div>
+                                <span>Total balance</span>
+                                <strong>@Signed(due.TotalBalance)</strong>
+                            </div>
+                        </div>
+                    }
+
+                    @if (canRecord)
+                    {
+                        <div class="pp-form-grid">
+                            <div class="pp-field">
+                                <label class="form-label" for="ppAmount">Amount received (&#8377;)</label>
+                                <input id="ppAmount" class="form-control pp-amount @(amountText.Length > 0 && ParsedAmount is null ? "is-invalid" : "")"
+                                       inputmode="decimal" placeholder="e.g. 5000" autocomplete="off"
+                                       @bind="amountText" @bind:event="oninput" disabled="@(selectedDocId is null)" @ref="amountInput" />
+                                @if (SelectedDue is { } d2 && (d2.PendingFromBills > 0 || d2.TotalBalance > 0))
+                                {
+                                    <div class="pp-quick">
+                                        @if (d2.PendingFromBills > 0)
+                                        {
+                                            <button type="button" class="pp-chip" @onclick="() => SetAmount(d2.PendingFromBills)">Full pending @Money(d2.PendingFromBills)</button>
+                                        }
+                                        @if (d2.TotalBalance > 0 && d2.TotalBalance != d2.PendingFromBills)
+                                        {
+                                            <button type="button" class="pp-chip" @onclick="() => SetAmount(d2.TotalBalance)">Everything @Money(d2.TotalBalance)</button>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                            <div class="pp-field">
+                                <label class="form-label" for="ppDate">Date received</label>
+                                <input id="ppDate" type="date" class="form-control" @bind="paymentDate"
+                                       min="@startDate.ToString("yyyy-MM-dd")" max="@DoctorLedgerStore.Today.ToString("yyyy-MM-dd")" />
+                            </div>
+                        </div>
+
+                        <div class="pp-field">
+                            <label class="form-label">Paid by</label>
+                            <div class="pp-seg" role="group" aria-label="Payment mode">
+                                @foreach (var m in PaymentModes.All)
+                                {
+                                    var value = m;
+                                    <button type="button" class="pp-seg-btn @(mode == value ? "active" : "")" aria-pressed="@(mode == value ? "true" : "false")" @onclick="() => mode = value">@value</button>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="pp-form-grid">
+                            <div class="pp-field">
+                                <label class="form-label" for="ppRef">Reference <span class="text-muted">(optional)</span></label>
+                                <input id="ppRef" class="form-control" maxlength="100" placeholder="@(mode == "Cheque" ? "Cheque number" : mode == "Cash" ? "Receipt number" : "UTR / transaction ID")" @bind="reference" />
+                            </div>
+                            <div class="pp-field">
+                                <label class="form-label" for="ppNotes">Note <span class="text-muted">(optional)</span></label>
+                                <input id="ppNotes" class="form-control" maxlength="250" placeholder="e.g. Part payment for September" @bind="notes" />
+                            </div>
+                        </div>
+
+                        @if (SelectedDue is { } d3 && ParsedAmount is { } amt && amt > 0)
+                        {
+                            var remaining = d3.PendingFromBills - amt;
+                            <div class="pp-result @(remaining > 0.004m ? "is-partial" : remaining < -0.004m ? "is-advance" : "is-full")">
+                                @if (remaining > 0.004m)
+                                {
+                                    <span><strong>Part payment.</strong> @Money(remaining) stays pending and is added to the next bill as Old due.</span>
+                                }
+                                else if (remaining < -0.004m)
+                                {
+                                    <span><strong>@Money(-remaining) more than the pending bills.</strong> It is kept as an advance and taken off the next bill.</span>
+                                }
+                                else
+                                {
+                                    <span><strong>Fully paid.</strong> Nothing from earlier bills will carry forward.</span>
+                                }
+                            </div>
+                        }
+
+                        @if (formMessage is not null)
+                        {
+                            <div class="alert @(formError ? "alert-danger" : "alert-success") py-2 mb-2">@formMessage</div>
+                        }
+
+                        <div class="pp-actions">
+                            <button type="button" class="act-btn act-primary" disabled="@(saving || selectedDocId is null)" @onclick="SavePaymentAsync">
+                                @if (saving)
+                                {
+                                    <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                                    <span>Saving&hellip;</span>
+                                }
+                                else
+                                {
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>
+                                    <span>Save payment</span>
+                                }
+                            </button>
+                            @if (canBill && selectedDocId is { } billDoc)
+                            {
+                                <a class="act-btn act-secondary" href="@($"doctor-bill?doc={billDoc}")">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+                                    <span>Open bill</span>
+                                </a>
+                            }
+                        </div>
+                    }
+                    else if (formMessage is not null)
+                    {
+                        <div class="alert alert-info py-2">@formMessage</div>
+                    }
+                </div>
+            </section>
+
+            @* ---------------- Statement ---------------- *@
+            <section class="card pp-card" aria-labelledby="ppStatementTitle">
+                <div class="pp-card-head">
+                    <h5 id="ppStatementTitle">@StatementTitle</h5>
+                    @if (statement is not null && statementRows.Count > 0)
+                    {
+                        <span class="pp-balance-chip @(statementRows[^1].Balance > 0.004m ? "is-due" : "is-clear")">Balance @Signed(statementRows[^1].Balance)</span>
+                    }
+                </div>
+                <div class="pp-card-body pp-statement-body">
+                    @if (selectedDocId is null)
+                    {
+                        <div class="pp-empty">Select a doctor to see their bills and payments, with a running balance.</div>
+                    }
+                    else if (statementLoading)
+                    {
+                        <div class="pp-empty"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Loading statement&hellip;</div>
+                    }
+                    else if (statementRows.Count > 0)
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm pp-table pp-statement">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Particulars</th>
+                                        <th class="text-end">Charges</th>
+                                        <th class="text-end">Received</th>
+                                        <th class="text-end">Balance</th>
+                                        @if (canVoid)
+                                        {
+                                            <th aria-label="Actions"></th>
+                                        }
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in statementRows)
+                                    {
+                                        var e = row.Entry;
+                                        <tr class="@(e.IsVoided ? "is-voided" : "") kind-@(e.Kind.ToString().ToLowerInvariant())">
+                                            <td class="text-nowrap">@e.Date.ToString("dd MMM yy")</td>
+                                            <td>
+                                                <div class="pp-particular">@e.Description</div>
+                                                @if (!string.IsNullOrWhiteSpace(e.Detail))
+                                                {
+                                                    <small class="text-muted">@e.Detail</small>
+                                                }
+                                            </td>
+                                            <td class="text-end text-nowrap">@(e.Charge != 0 ? Signed(e.Charge) : "")</td>
+                                            <td class="text-end text-nowrap pp-paid">@(e.Payment != 0 ? Money(e.Payment) : "")</td>
+                                            <td class="text-end text-nowrap fw-semibold">@Signed(row.Balance)</td>
+                                            @if (canVoid)
+                                            {
+                                                <td class="text-end">
+                                                    @if (e.Kind == LedgerEntryKind.Payment && !e.IsVoided && e.PaymentId is { } pid)
+                                                    {
+                                                        <button type="button" class="icon-btn icon-danger" title="Void this payment" aria-label="Void payment" @onclick="() => StartVoid(pid)">
+                                                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>
+                                                        </button>
+                                                    }
+                                                </td>
+                                            }
+                                        </tr>
+                                        @if (voidingId is not null && voidingId == e.PaymentId && !e.IsVoided)
+                                        {
+                                            <tr class="pp-void-row">
+                                                <td colspan="@(canVoid ? 6 : 5)">
+                                                    <div class="pp-void">
+                                                        <span>Void @Money(e.Payment) received on @e.Date.ToString("dd MMM yyyy")?</span>
+                                                        <input class="form-control form-control-sm" placeholder="Reason (required), e.g. entered twice" maxlength="250" @bind="voidReason" @bind:event="oninput" />
+                                                        <button type="button" class="act-btn act-danger act-sm" disabled="@(voiding || string.IsNullOrWhiteSpace(voidReason))" @onclick="ConfirmVoidAsync">Void payment</button>
+                                                        <button type="button" class="act-btn act-ghost act-sm" @onclick="() => voidingId = null">Keep</button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="pp-footnote">Voided payments are shown struck through and don&rsquo;t count. GST and adjustments appear here once a bill is saved from the Doctor Bill page.</p>
+                    }
+                </div>
+            </section>
+        </div>
+
+        @* ---------------- Dues by doctor ---------------- *@
+        <section class="card pp-card" aria-labelledby="ppDuesTitle">
+            <div class="pp-card-head pp-card-head-wrap">
+                <h5 id="ppDuesTitle">Dues by doctor</h5>
+                <div class="pp-tools">
+                    <input class="form-control form-control-sm pp-search" placeholder="Search doctor" @bind="dueSearch" @bind:event="oninput" aria-label="Search doctor" />
+                    <label class="pp-switch">
+                        <input type="checkbox" @bind="onlyWithDues" />
+                        <span>Only with dues</span>
+                    </label>
+                </div>
+            </div>
+            <div class="pp-card-body p-0">
+                @if (!VisibleDues.Any())
+                {
+                    <div class="pp-empty">@(onlyWithDues ? "No pending dues. Everyone is paid up." : "No doctors found.")</div>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm pp-table pp-dues mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Doctor</th>
+                                    <th class="text-end">Pending from bills</th>
+                                    <th class="text-end">This month (not billed)</th>
+                                    <th class="text-end">Total balance</th>
+                                    <th>Last payment</th>
+                                    <th aria-label="Actions"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var d in VisibleDues)
+                                {
+                                    var row = d;
+                                    <tr class="@(row.DocId == selectedDocId ? "is-selected" : "")">
+                                        <td>
+                                            <button type="button" class="pp-link" @onclick="() => SelectDoctorAsync(row.DocId)">@row.DoctorName</button>
+                                            @if (!row.IsActive)
+                                            {
+                                                <span class="pp-pill">inactive</span>
+                                            }
+                                        </td>
+                                        <td class="text-end text-nowrap @(row.PendingFromBills > 0.004m ? "is-due" : row.PendingFromBills < -0.004m ? "is-advance" : "")">@Signed(row.PendingFromBills)</td>
+                                        <td class="text-end text-nowrap">@Money(row.ChargesThisMonth)</td>
+                                        <td class="text-end text-nowrap fw-semibold">@Signed(row.TotalBalance)</td>
+                                        <td class="text-nowrap text-muted">@(row.LastPaymentDate?.ToString("dd MMM yyyy") ?? "—")</td>
+                                        <td class="text-end text-nowrap">
+                                            @if (canRecord)
+                                            {
+                                                <button type="button" class="act-btn act-secondary act-sm" @onclick="() => SelectDoctorAsync(row.DocId, true)">Record payment</button>
+                                            }
+                                            @if (canBill)
+                                            {
+                                                <a class="act-btn act-ghost act-sm" href="@($"doctor-bill?doc={row.DocId}")">Bill</a>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td>Total (@Plural(VisibleDues.Count(), "doctor"))</td>
+                                    <td class="text-end text-nowrap">@Signed(VisibleDues.Sum(x => x.PendingFromBills))</td>
+                                    <td class="text-end text-nowrap">@Money(VisibleDues.Sum(x => x.ChargesThisMonth))</td>
+                                    <td class="text-end text-nowrap">@Signed(VisibleDues.Sum(x => x.TotalBalance))</td>
+                                    <td colspan="2"></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                }
+            </div>
+        </section>
+
+        @* ---------------- Payment history ---------------- *@
+        <section class="card pp-card" aria-labelledby="ppHistoryTitle">
+            <div class="pp-card-head pp-card-head-wrap">
+                <h5 id="ppHistoryTitle">Payments received</h5>
+                <div class="pp-tools">
+                    <div class="pp-month" role="group" aria-label="Month">
+                        <button type="button" class="icon-btn" aria-label="Previous month" @onclick="() => ChangeHistoryMonthAsync(-1)">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+                        </button>
+                        <strong>@historyMonth.ToString("MMMM yyyy")</strong>
+                        <button type="button" class="icon-btn" aria-label="Next month" disabled="@(historyMonth >= DoctorLedgerStore.FirstOfMonth(DoctorLedgerStore.Today))" @onclick="() => ChangeHistoryMonthAsync(1)">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                        </button>
+                    </div>
+                    <label class="pp-switch">
+                        <input type="checkbox" @bind="showVoided" />
+                        <span>Show voided</span>
+                    </label>
+                </div>
+            </div>
+            <div class="pp-card-body p-0">
+                @if (historyLoading)
+                {
+                    <div class="pp-empty"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Loading&hellip;</div>
+                }
+                else if (!VisibleHistory.Any())
+                {
+                    <div class="pp-empty">No payments recorded in @historyMonth.ToString("MMMM yyyy").</div>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm pp-table mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Doctor</th>
+                                    <th>Paid by</th>
+                                    <th>Reference / note</th>
+                                    <th class="text-end">Amount</th>
+                                    <th>Recorded by</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var p in VisibleHistory)
+                                {
+                                    var pay = p;
+                                    <tr class="@(pay.IsVoided ? "is-voided" : "")">
+                                        <td class="text-nowrap">@pay.PaymentDate.ToString("dd MMM yyyy")</td>
+                                        <td><button type="button" class="pp-link" @onclick="() => SelectDoctorAsync(pay.DocId)">@pay.DoctorName</button></td>
+                                        <td><span class="pp-mode">@pay.Mode</span></td>
+                                        <td>
+                                            @(string.Join(" · ", new[] { pay.Reference, pay.Notes }.Where(s => !string.IsNullOrWhiteSpace(s))))
+                                            @if (pay.IsVoided)
+                                            {
+                                                <div class="text-danger small">Voided by @pay.VoidedBy: @pay.VoidReason</div>
+                                            }
+                                        </td>
+                                        <td class="text-end text-nowrap fw-semibold pp-paid">@Money(pay.Amount)</td>
+                                        <td class="text-muted small">@pay.CreatedBy</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td colspan="4">Total received in @historyMonth.ToString("MMMM")</td>
+                                    <td class="text-end text-nowrap">@Money(history.Where(x => !x.IsVoided).Sum(x => x.Amount))</td>
+                                    <td></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                }
+            </div>
+        </section>
+
+        @* ---------------- Setup (opening balances) ---------------- *@
+        @if (canSetup)
+        {
+            <section class="card pp-card" aria-labelledby="ppSetupTitle">
+                <div class="pp-card-head">
+                    <h5 id="ppSetupTitle">Opening balances</h5>
+                    <button type="button" class="act-btn act-ghost act-sm" @onclick="ToggleSetupAsync" aria-expanded="@(showSetup ? "true" : "false")">@(showSetup ? "Hide" : "Set up")</button>
+                </div>
+                @if (showSetup)
+                {
+                    <div class="pp-card-body">
+                        <p class="pp-help">
+                            Dues are worked out from <strong>@startDate.ToString("dd MMM yyyy")</strong>. For each doctor, enter what they still owed on that date
+                            (for example the Old due on their last bill). Use a minus for an advance. Leave blank or 0 if nothing was pending.
+                        </p>
+
+                        <div class="pp-setup-start">
+                            <div class="pp-field">
+                                <label class="form-label" for="ppStart">Track dues from</label>
+                                <input id="ppStart" type="date" class="form-control form-control-sm" @bind="setupStart" />
+                            </div>
+                            <button type="button" class="act-btn act-secondary act-sm" disabled="@(savingSetup || setupStart == startDate)" @onclick="SaveStartDateAsync">Change start date</button>
+                            @if (setupStart != startDate)
+                            {
+                                <span class="pp-warn">Changing this recalculates every doctor&rsquo;s dues. Work and payments before it stop counting.</span>
+                            }
+                        </div>
+
+                        <input class="form-control form-control-sm pp-search mb-2" placeholder="Search doctor" @bind="setupSearch" @bind:event="oninput" aria-label="Search doctor" />
+
+                        <div class="table-responsive pp-setup-table">
+                            <table class="table table-sm pp-table mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Doctor</th>
+                                        <th class="text-end" style="width: 200px;">Pending on @startDate.ToString("dd MMM yyyy") (&#8377;)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var doc in SetupDoctors)
+                                    {
+                                        var id = doc.DocId;
+                                        var text = openingText.TryGetValue(id, out var t) ? t : "";
+                                        var bad = text.Length > 0 && ParseAmount(text) is null;
+                                        <tr>
+                                            <td>@doc.DocName @(doc.IsActive ? "" : "(inactive)")</td>
+                                            <td>
+                                                <input class="form-control form-control-sm text-end @(bad ? "is-invalid" : "") @(IsOpeningChanged(id) ? "is-changed" : "")"
+                                                       inputmode="decimal" placeholder="0" value="@text"
+                                                       @oninput="e => openingText[id] = e.Value?.ToString() ?? string.Empty" aria-label="Opening balance for @doc.DocName" />
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                        @if (setupMessage is not null)
+                        {
+                            <div class="alert @(setupError ? "alert-danger" : "alert-success") py-2 mt-2 mb-0">@setupMessage</div>
+                        }
+
+                        <div class="pp-actions mt-2">
+                            <button type="button" class="act-btn act-primary" disabled="@(savingSetup || ChangedOpeningCount == 0)" @onclick="SaveOpeningBalancesAsync">
+                                @(savingSetup ? "Saving…" : ChangedOpeningCount == 0 ? "Save opening balances" : $"Save {ChangedOpeningCount} change{(ChangedOpeningCount == 1 ? "" : "s")}")
+                            </button>
+                        </div>
+                    </div>
+                }
+            </section>
+        }
+    }
+</div>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+
+    /// <summary>/doctor-payments?doc=12 opens with that doctor selected.</summary>
+    [SupplyParameterFromQuery(Name = "doc")]
+    public int? QueryDoc { get; set; }
+
+    private List<Doctor> doctors = [];
+    private List<DoctorDue> dues = [];
+    private DateOnly startDate = DoctorLedgerStore.FirstOfMonth(DoctorLedgerStore.Today).AddMonths(-1);
+    private bool loading = true;
+    private string? loadError;
+
+    private bool canRecord;
+    private bool canVoid;
+    private bool canSetup;
+    private bool canBill;
+    private string userName = "unknown";
+
+    // ---- record a payment ----
+    private int? selectedDocId;
+    private string amountText = "";
+    private DateOnly paymentDate = DoctorLedgerStore.Today;
+    private string mode = "Cash";
+    private string? reference;
+    private string? notes;
+    private bool saving;
+    private string? formMessage;
+    private bool formError;
+
+    // ---- statement ----
+    private List<LedgerEntry>? statement;
+    private List<StatementRow> statementRows = [];
+    private bool statementLoading;
+    private int? voidingId;
+    private string voidReason = "";
+    private bool voiding;
+
+    private sealed record StatementRow(LedgerEntry Entry, decimal Balance);
+
+    // ---- history ----
+    private DateOnly historyMonth = DoctorLedgerStore.FirstOfMonth(DoctorLedgerStore.Today);
+    private List<DoctorPayment> history = [];
+    private bool showVoided;
+    private bool historyLoading;
+    private decimal receivedThisMonth;
+    private int paymentsThisMonth;
+
+    // ---- dues table ----
+    private string dueSearch = "";
+    private bool onlyWithDues = true;
+
+    // ---- setup ----
+    private bool showSetup;
+    private DateOnly setupStart;
+    private Dictionary<int, decimal> openingSaved = [];
+    private Dictionary<int, string> openingText = [];
+    private string setupSearch = "";
+    private bool savingSetup;
+    private string? setupMessage;
+    private bool setupError;
+
+    private DoctorDue? SelectedDue => selectedDocId is { } id ? dues.FirstOrDefault(d => d.DocId == id) : null;
+
+    private decimal TotalPending => dues.Where(d => d.PendingFromBills > 0).Sum(d => d.PendingFromBills);
+
+    private int DoctorsWithDues => dues.Count(d => d.PendingFromBills > 0.004m);
+
+    private decimal ReceivedThisMonth => receivedThisMonth;
+
+    private int PaymentsThisMonth => paymentsThisMonth;
+
+    private decimal? ParsedAmount => ParseAmount(amountText);
+
+    private IEnumerable<DoctorDue> VisibleDues =>
+        dues.Where(d => (!onlyWithDues || Math.Abs(d.PendingFromBills) > 0.004m || Math.Abs(d.TotalBalance) > 0.004m)
+                        && (dueSearch.Length == 0 || d.DoctorName.Contains(dueSearch.Trim(), StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(d => onlyWithDues ? d.PendingFromBills : 0)
+            .ThenBy(d => d.DoctorName);
+
+    private IEnumerable<DoctorPayment> VisibleHistory => history.Where(p => showVoided || !p.IsVoided);
+
+    private IEnumerable<Doctor> SetupDoctors =>
+        doctors.Where(d => (d.IsActive || openingSaved.ContainsKey(d.DocId))
+                           && (setupSearch.Length == 0 || d.DocName.Contains(setupSearch.Trim(), StringComparison.OrdinalIgnoreCase)));
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthenticationStateTask).User;
+        userName = user.FindFirstValue(ClaimTypes.Email) ?? user.Identity?.Name ?? "unknown";
+        canRecord = Permissions.IsAllowed(user, Perm.PaymentsRecord);
+        canVoid = Permissions.IsAllowed(user, Perm.PaymentsVoid);
+        canSetup = Permissions.IsAllowed(user, Perm.PaymentsSetup);
+        canBill = Permissions.IsAllowed(user, Perm.BillingView);
+
+        try
+        {
+            doctors = await DoctorService.GetAllAsync(includeInactive: true);
+            await ReloadAsync();
+
+            if (QueryDoc is { } doc && doctors.Any(d => d.DocId == doc))
+            {
+                selectedDocId = doc;
+                await LoadStatementAsync();
+            }
+        }
+        catch (Exception)
+        {
+            loadError = "Dues could not be loaded. Please refresh the page.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    /// <summary>Dues, this month's receipts and the history list.</summary>
+    private async Task ReloadAsync()
+    {
+        startDate = await Ledger.GetStartDateAsync();
+        setupStart = startDate;
+        dues = await Ledger.GetDuesAsync();
+
+        var monthStart = DoctorLedgerStore.FirstOfMonth(DoctorLedgerStore.Today);
+        var thisMonth = await Ledger.GetPaymentsAsync(monthStart, monthStart.AddMonths(1).AddDays(-1), includeVoided: false);
+        receivedThisMonth = thisMonth.Sum(p => p.Amount);
+        paymentsThisMonth = thisMonth.Count;
+
+        await LoadHistoryAsync();
+    }
+
+    private async Task LoadHistoryAsync()
+    {
+        historyLoading = true;
+        try
+        {
+            history = await Ledger.GetPaymentsAsync(historyMonth, historyMonth.AddMonths(1).AddDays(-1));
+        }
+        finally
+        {
+            historyLoading = false;
+        }
+    }
+
+    private async Task ChangeHistoryMonthAsync(int delta)
+    {
+        historyMonth = historyMonth.AddMonths(delta);
+        await LoadHistoryAsync();
+    }
+
+    private Task DoctorChangedAsync()
+    {
+        formMessage = null;
+        amountText = "";
+        voidingId = null;
+        return LoadStatementAsync();
+    }
+
+    private async Task SelectDoctorAsync(int docId, bool focusPayment = false)
+    {
+        selectedDocId = docId;
+        await DoctorChangedAsync();
+        // Back up to the form; "Record payment" also puts the cursor in the amount box.
+        focusAmount = focusPayment && canRecord;
+        scrollToTop = !focusAmount;
+    }
+
+    private ElementReference amountInput;
+    private bool focusAmount;
+    private bool scrollToTop;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusAmount)
+        {
+            focusAmount = false;
+            try
+            {
+                await amountInput.FocusAsync(preventScroll: false);
+            }
+            catch (Exception)
+            {
+                // input not rendered (e.g. view-only user) - nothing to do
+            }
+        }
+        else if (scrollToTop)
+        {
+            scrollToTop = false;
+            try
+            {
+                await JS.InvokeVoidAsync("scrollTo", new { top = 0, behavior = "smooth" });
+            }
+            catch (Exception)
+            {
+                // scrolling is only a convenience
+            }
+        }
+    }
+
+    private void SetAmount(decimal value) => amountText = value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private string StatementTitle => SelectedDue is { } due ? $"Statement – {due.DoctorName}" : "Statement";
+
+    private static string Plural(int count, string word) => $"{count} {word}{(count == 1 ? "" : "s")}";
+
+    private async Task LoadStatementAsync()
+    {
+        statement = null;
+        statementRows = [];
+        if (selectedDocId is not { } docId)
+        {
+            return;
+        }
+
+        statementLoading = true;
+        try
+        {
+            statement = await Ledger.GetStatementAsync(docId);
+            var balance = 0m;
+            var rows = new List<StatementRow>();
+            foreach (var entry in statement)
+            {
+                if (!entry.IsVoided)
+                {
+                    balance += entry.Charge - entry.Payment;
+                }
+
+                rows.Add(new StatementRow(entry, balance));
+            }
+
+            statementRows = rows;
+        }
+        catch (Exception)
+        {
+            formMessage = "The statement could not be loaded.";
+            formError = true;
+        }
+        finally
+        {
+            statementLoading = false;
+        }
+    }
+
+    private async Task SavePaymentAsync()
+    {
+        formMessage = null;
+        formError = true;
+
+        if (!canRecord)
+        {
+            formMessage = "You don't have permission to record payments.";
+            return;
+        }
+
+        if (selectedDocId is not { } docId || SelectedDue is null && !doctors.Any(d => d.DocId == docId))
+        {
+            formMessage = "Select a doctor.";
+            return;
+        }
+
+        if (ParsedAmount is not { } amount || amount <= 0)
+        {
+            formMessage = "Enter the amount received (more than 0).";
+            return;
+        }
+
+        if (paymentDate < startDate)
+        {
+            formMessage = $"Dues are tracked from {startDate:dd MMM yyyy}. For money received before that, adjust the doctor's opening balance instead.";
+            return;
+        }
+
+        if (paymentDate > DoctorLedgerStore.Today)
+        {
+            formMessage = "The date received can't be in the future.";
+            return;
+        }
+
+        saving = true;
+        try
+        {
+            var pendingBefore = SelectedDue?.PendingFromBills ?? 0;
+            await Ledger.AddPaymentAsync(new NewPayment(docId, paymentDate, amount, mode, reference, notes), userName);
+
+            var name = doctors.FirstOrDefault(d => d.DocId == docId)?.DocName ?? "the doctor";
+            var remaining = pendingBefore - amount;
+            formMessage = remaining > 0.004m
+                ? $"Saved {Money(amount)} from {name}. {Money(remaining)} is still pending and will show as Old due on the next bill."
+                : remaining < -0.004m
+                    ? $"Saved {Money(amount)} from {name}. {Money(-remaining)} is kept as an advance for the next bill."
+                    : $"Saved {Money(amount)} from {name}. Earlier bills are fully paid.";
+            formError = false;
+
+            amountText = "";
+            reference = null;
+            notes = null;
+            paymentDate = DoctorLedgerStore.Today;
+
+            await ReloadAsync();
+            await LoadStatementAsync();
+        }
+        catch (Exception)
+        {
+            formMessage = "The payment could not be saved. Please try again.";
+            formError = true;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private void StartVoid(int paymentId)
+    {
+        voidingId = paymentId;
+        voidReason = "";
+    }
+
+    private async Task ConfirmVoidAsync()
+    {
+        if (!canVoid || voidingId is not { } id || string.IsNullOrWhiteSpace(voidReason))
+        {
+            return;
+        }
+
+        voiding = true;
+        try
+        {
+            await Ledger.VoidPaymentAsync(id, voidReason, userName);
+            voidingId = null;
+            formMessage = "Payment voided. Dues have been updated.";
+            formError = false;
+            await ReloadAsync();
+            await LoadStatementAsync();
+        }
+        catch (Exception)
+        {
+            formMessage = "The payment could not be voided. Please try again.";
+            formError = true;
+        }
+        finally
+        {
+            voiding = false;
+        }
+    }
+
+    // ---- setup ----
+
+    private async Task ToggleSetupAsync()
+    {
+        showSetup = !showSetup;
+        setupMessage = null;
+        if (showSetup)
+        {
+            await LoadOpeningBalancesAsync();
+        }
+    }
+
+    private async Task LoadOpeningBalancesAsync()
+    {
+        openingSaved = await Ledger.GetOpeningBalancesAsync();
+        openingText = openingSaved.ToDictionary(kv => kv.Key, kv => kv.Value.ToString("0.##", CultureInfo.InvariantCulture));
+    }
+
+    private bool IsOpeningChanged(int docId)
+    {
+        var saved = openingSaved.TryGetValue(docId, out var s) ? s : 0m;
+        var text = openingText.TryGetValue(docId, out var t) ? t : "";
+        var value = string.IsNullOrWhiteSpace(text) ? 0m : ParseAmount(text);
+        return value is null || value.Value != saved;
+    }
+
+    private int ChangedOpeningCount => doctors.Count(d => IsOpeningChanged(d.DocId));
+
+    private async Task SaveOpeningBalancesAsync()
+    {
+        setupMessage = null;
+        setupError = true;
+        if (!canSetup)
+        {
+            setupMessage = "You don't have permission to change opening balances.";
+            return;
+        }
+
+        var changes = new Dictionary<int, decimal>();
+        foreach (var doc in doctors.Where(d => IsOpeningChanged(d.DocId)))
+        {
+            var text = openingText.TryGetValue(doc.DocId, out var t) ? t : "";
+            var value = string.IsNullOrWhiteSpace(text) ? 0m : ParseAmount(text);
+            if (value is null)
+            {
+                setupMessage = $"\"{text}\" for {doc.DocName} is not a number.";
+                return;
+            }
+
+            changes[doc.DocId] = value.Value;
+        }
+
+        savingSetup = true;
+        try
+        {
+            await Ledger.SaveOpeningBalancesAsync(changes, userName);
+            await LoadOpeningBalancesAsync();
+            await ReloadAsync();
+            await LoadStatementAsync();
+            setupMessage = $"Saved {changes.Count} opening balance{(changes.Count == 1 ? "" : "s")}. Dues are updated.";
+            setupError = false;
+        }
+        catch (Exception)
+        {
+            setupMessage = "Opening balances could not be saved. Please try again.";
+        }
+        finally
+        {
+            savingSetup = false;
+        }
+    }
+
+    private async Task SaveStartDateAsync()
+    {
+        setupMessage = null;
+        setupError = true;
+        if (!canSetup)
+        {
+            return;
+        }
+
+        if (setupStart > DoctorLedgerStore.Today)
+        {
+            setupMessage = "The start date can't be in the future.";
+            return;
+        }
+
+        savingSetup = true;
+        try
+        {
+            await Ledger.SetStartDateAsync(setupStart, userName);
+            await ReloadAsync();
+            await LoadStatementAsync();
+            setupMessage = $"Dues are now tracked from {startDate:dd MMM yyyy}. Check the opening balances below for that date.";
+            setupError = false;
+        }
+        catch (Exception)
+        {
+            setupMessage = "The start date could not be saved. Please try again.";
+        }
+        finally
+        {
+            savingSetup = false;
+        }
+    }
+
+    // ---- formatting ----
+
+    private static readonly CultureInfo India = CultureInfo.GetCultureInfo("en-IN");
+
+    private static string Money(decimal value) => "₹" + value.ToString("N2", India);
+
+    /// <summary>Negative amounts (advance / credit) shown with a proper minus sign.</summary>
+    private static string Signed(decimal value) => value < 0 ? "−" + Money(-value) : Money(value);
+
+    /// <summary>"-500", "₹1,200.50", "5000" → number; anything else → null.</summary>
+    private static decimal? ParseAmount(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var cleaned = text.Trim()
+            .Replace("−", "-")
+            .Replace("–", "-")
+            .Replace("₹", "")
+            .Replace("Rs.", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("Rs", "", StringComparison.OrdinalIgnoreCase)
+            .Replace(",", "")
+            .Replace(" ", "");
+
+        if (cleaned is "-" or "+" or "")
+        {
+            return null;
+        }
+
+        return decimal.TryParse(cleaned, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value)
+            ? Math.Round(value, 2)
+            : null;
+    }
+}

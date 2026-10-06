@@ -1,0 +1,6 @@
+﻿CREATE PROCEDURE dbo.usp_GetNextCaseId
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT NEXT VALUE FOR dbo.Seq_CaseId AS CaseId;
+END

@@ -1,0 +1,2 @@
+/* Doctor Bill styles now live in wwwroot/css/doctor-bill.css (loaded by App.razor),
+   so they no longer depend on the scoped-CSS build step. Keep this file empty. */

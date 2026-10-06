@@ -1,0 +1,302 @@
+.page {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+    /* Glass theme: soft teal / mint / gold light behind translucent panels */
+    background-color: #eef4f2;
+    background-image:
+        radial-gradient(48rem 32rem at 12% -8%, rgba(20, 184, 166, .22), transparent 60%),
+        radial-gradient(40rem 30rem at 100% 12%, rgba(184, 135, 58, .16), transparent 62%),
+        radial-gradient(46rem 36rem at 70% 110%, rgba(15, 118, 110, .16), transparent 60%),
+        linear-gradient(180deg, #f3f8f6 0%, #eaf2ef 100%);
+    background-attachment: fixed;
+}
+
+main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ===== Sidebar ===== */
+/* Same deep-teal gradient as the login page's brand panel, hardcoded
+   directly (a Blazor-scoped :root block cannot define usable custom
+   properties, since the scope attribute never reaches <html>). */
+
+.sidebar {
+    background: linear-gradient(190deg, rgba(11, 88, 82, .94) 0%, rgba(15, 118, 110, .9) 55%, rgba(17, 94, 89, .94) 100%);
+    backdrop-filter: blur(18px) saturate(150%);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    border-right: 1px solid rgba(255, 255, 255, .14);
+    box-shadow: 4px 0 30px rgba(11, 40, 37, .16);
+    position: relative;
+    z-index: 1000;
+}
+
+.sidebar::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 15% 0%, rgba(255,255,255,.10), transparent 40%);
+    pointer-events: none;
+}
+
+.sidebar::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.12), transparent);
+    pointer-events: none;
+}
+
+/* ===== Top Navigation Bar ===== */
+
+.top-row {
+    background-color: rgba(255, 255, 255, .55);
+    backdrop-filter: blur(12px) saturate(160%);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    border-bottom: 1px solid rgba(255, 255, 255, .7);
+    justify-content: space-between;
+    height: 3.5rem;
+    display: flex;
+    align-items: center;
+    padding: 0 2rem;
+    box-shadow: 0 1px 3px rgba(23, 43, 40, .04);
+    z-index: 50;
+    transition: box-shadow .2s ease;
+}
+
+.top-row-left {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    min-width: 0;
+}
+
+/* Hamburger: only shown on mobile (see media query below) */
+.menu-toggle {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    margin-left: -.35rem;
+    padding: 0;
+    color: #0f766e;
+    background: transparent;
+    border: 0;
+    border-radius: 10px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background-color .15s ease;
+}
+
+.menu-toggle:hover,
+.menu-toggle:focus-visible {
+    background-color: rgba(15, 118, 110, .1);
+    outline: none;
+}
+
+.top-row-tagline {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--font-heading, inherit);
+    font-weight: 700;
+    font-size: .85rem;
+    color: #172321;
+    letter-spacing: -.01em;
+}
+
+.top-row-date {
+    font-size: .78rem;
+    color: var(--muted, #6b7280);
+}
+
+/* ===== Content Area ===== */
+
+article {
+    flex: 1;
+    overflow-y: auto;
+    background-color: #f7f5f0;
+}
+
+/* ===== Error UI ===== */
+
+#blazor-error-ui {
+    background: linear-gradient(135deg, #fbeae8 0%, #f6d6d1 100%);
+    border-top: 2px solid #c0362c;
+    bottom: 0;
+    box-shadow: 0 -4px 12px rgba(192, 54, 44, 0.15);
+    box-sizing: border-box;
+    display: none;
+    left: 0;
+    padding: 1rem 1.5rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1001;
+    color: #7c2119;
+    font-weight: 500;
+    font-size: 0.95rem;
+}
+
+#blazor-error-ui::before {
+    content: "⚠️ ";
+    margin-right: 0.5rem;
+}
+
+#blazor-error-ui .reload {
+    color: #7c2119;
+    text-decoration: underline;
+    font-weight: 600;
+    cursor: pointer;
+    margin-left: 0.5rem;
+}
+
+#blazor-error-ui .reload:hover {
+    text-decoration: none;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    right: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 1.25rem;
+    transition: all 0.2s ease;
+}
+
+#blazor-error-ui .dismiss:hover {
+    opacity: 0.7;
+}
+
+/* ===== Responsive Design ===== */
+
+@media (max-width: 640.98px) {
+    .page {
+        flex-direction: column;
+    }
+
+    /* Off-canvas drawer: slides in from the left */
+    .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: min(82vw, 300px);
+        height: 100vh;
+        height: 100dvh;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        transform: translateX(-100%);
+        visibility: hidden;
+        transition: transform .28s cubic-bezier(.4, 0, .2, 1), visibility 0s linear .28s;
+        will-change: transform;
+        z-index: 1000;
+    }
+
+    html.nav-open .sidebar {
+        transform: translateX(0);
+        visibility: visible;
+        transition-delay: 0s;
+        box-shadow: 6px 0 28px rgba(11, 40, 37, .3);
+    }
+
+    /* While the finger is dragging, follow it 1:1 (no animation) */
+    html.nav-dragging .sidebar {
+        transition: none;
+        visibility: visible;
+    }
+
+    .nav-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(11, 30, 28, .5);
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity .28s ease, visibility 0s linear .28s;
+        z-index: 990;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    html.nav-open .nav-backdrop {
+        opacity: 1;
+        visibility: visible;
+        transition-delay: 0s;
+    }
+
+    html.nav-dragging .nav-backdrop {
+        transition: none;
+        visibility: visible;
+    }
+
+    .menu-toggle {
+        display: inline-flex;
+    }
+
+    .top-row {
+        justify-content: space-between;
+        padding: 0 1rem;
+    }
+
+    .top-row-date { display: none; }
+
+    article {
+        padding: 1rem !important;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sidebar,
+    .nav-backdrop {
+        transition-duration: 0s !important;
+    }
+}
+
+@media (min-width: 641px) {
+    .page {
+        flex-direction: row;
+    }
+
+    .sidebar {
+        width: 264px;
+        height: 100vh;
+        position: sticky;
+        top: 0;
+        flex-shrink: 0;
+        overflow-y: auto;
+    }
+
+    main {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .top-row {
+        position: sticky;
+        top: 0;
+        z-index: 40;
+    }
+
+    .top-row,
+    article {
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+    }
+
+    article {
+        padding-top: 1.5rem !important;
+        padding-bottom: 2rem !important;
+    }
+}
+
+@media (min-width: 641px) {
+    .nav-backdrop { display: none; }
+}

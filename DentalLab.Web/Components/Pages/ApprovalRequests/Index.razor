@@ -1,0 +1,108 @@
+﻿@page "/approval-requests"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.ApprovalsView)]
+
+@using System.Security.Claims
+@using DentalLab.Application.Abstractions
+@using DentalLab.Application.Models.Approvals
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+
+@inject ICaseApprovalService ApprovalService
+
+<PageTitle>Approval Requests</PageTitle>
+
+<h3>Approval Requests</h3>
+
+@if (loading)
+{
+    <p>Loading...</p>
+}
+else if (items.Count == 0)
+{
+    <div class="alert alert-info">No approval requests found.</div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle">
+            <thead><tr>
+                @SortHeader("RequestId", "ID")
+                @SortHeader("CaseId", "Case")
+                @SortHeader("RequestType", "Type")
+                @SortHeader("RequestedBy", "Requested By")
+                @SortHeader("AssignedAdmin", "Assigned Admin")
+                @SortHeader("RequestedOn", "Requested")
+                @SortHeader("Status", "Status")
+                <th></th>
+            </tr></thead>
+            <tbody>
+                @foreach (var item in items)
+                {
+                    <tr>
+                        <td>#@item.RequestId</td><td>#@item.CaseId</td><td>@item.RequestType</td>
+                        <td>@item.RequestedByEmail</td><td>@item.AssignedAdminEmail</td>
+                        <td>@item.RequestedOn.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                        <td><span class="badge @StatusClass(item.Status)">@item.Status</span></td>
+                        <td><a class="btn btn-sm btn-outline-primary" href="@($"/approval-requests/{item.RequestId}")">View</a></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+    private List<CaseApprovalListItem> items = [];
+    private bool loading = true;
+    private string sortColumn = "RequestedOn";
+    private bool sortDescending = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthenticationStateTask;
+        var userId = state.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
+        items = await ApprovalService.GetForCurrentUserAsync(userId, state.User.IsInRole("Owner"));
+        ApplySort();
+        loading = false;
+    }
+
+    private void ApplySort()
+    {
+        Func<CaseApprovalListItem, object?> keySelector = sortColumn switch
+        {
+            "CaseId" => x => x.CaseId,
+            "RequestType" => x => x.RequestType,
+            "RequestedBy" => x => x.RequestedByEmail,
+            "AssignedAdmin" => x => x.AssignedAdminEmail,
+            "Status" => x => x.Status,
+            "RequestedOn" => x => x.RequestedOn,
+            _ => x => x.RequestId
+        };
+
+        items = (sortDescending ? items.OrderByDescending(keySelector) : items.OrderBy(keySelector)).ToList();
+    }
+
+    private void SortBy(string column)
+    {
+        if (sortColumn == column) sortDescending = !sortDescending;
+        else { sortColumn = column; sortDescending = false; }
+        ApplySort();
+    }
+
+    private RenderFragment SortHeader(string column, string label)
+    {
+        var isActive = sortColumn == column;
+        var cssClass = "sortable-th" + (isActive ? " sort-active" : "");
+        var icon = isActive ? (sortDescending ? "\u25bc" : "\u25b2") : "\u2195";
+
+        return @<th class="@cssClass" @onclick="() => SortBy(column)">@label<span class="sort-icon">@icon</span></th>;
+    }
+
+    private static string StatusClass(string status) => status switch
+    {
+        "Pending" => "text-bg-warning", "Approved" => "text-bg-primary", "Completed" => "text-bg-success",
+        "Rejected" => "text-bg-danger", _ => "text-bg-secondary"
+    };
+}

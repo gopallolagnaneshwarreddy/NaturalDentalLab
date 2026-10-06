@@ -1,0 +1,322 @@
+﻿@page "/cases"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.CasesView)]
+
+@using DentalLab.Application.Abstractions
+@using DentalLab.Application.Models.Cases
+@using DentalLab.Application.Models.Common
+@using DentalLab.Domain.Entities
+@using DentalLab.Web.Components.Shared
+@using Microsoft.AspNetCore.Authorization
+
+@inject PermissionStore Permissions
+@inject ICaseService CaseService
+@inject IDoctorService DoctorService
+
+<PageTitle>Cases</PageTitle>
+
+<div class="cases-page">
+    <div class="cases-heading">
+        <div>
+            <h3 class="mb-0">Cases</h3>
+            <small class="text-muted">Search and review dental-lab cases.</small>
+        </div>
+
+        @if (canCreate)
+        {
+            <a class="btn btn-primary btn-sm new-case-button" href="/cases/new">
+                New case
+            </a>
+        }
+    </div>
+
+    <div class="card filter-card">
+        <div class="card-body">
+            <div class="case-filters">
+                <div class="filter-field filter-case-id">
+                    <label class="form-label">Case ID</label>
+                    <InputNumber class="form-control form-control-sm" @bind-Value="filter.CaseId" />
+                </div>
+
+                <div class="filter-field filter-doctor">
+                    <label class="form-label">Doctor</label>
+                    <DoctorSearchSelect TItem="Doctor"
+                                        Items="doctors"
+                                        IdOf="d => d.DocId"
+                                        NameOf="d => d.DocName"
+                                        @bind-Value="filter.DocId"
+                                        EmptyText="All doctors"
+                                        Placeholder="All doctors"
+                                        Small="true" />
+                </div>
+
+                <div class="filter-field filter-patient">
+                    <label class="form-label">Patient / Reference</label>
+                    <InputText class="form-control form-control-sm" @bind-Value="filter.Patient" />
+                </div>
+
+                <div class="filter-field filter-date">
+                    <label class="form-label">From</label>
+                    <InputDate class="form-control form-control-sm" @bind-Value="filter.FromDate" />
+                </div>
+
+                <div class="filter-field filter-date">
+                    <label class="form-label">To</label>
+                    <InputDate class="form-control form-control-sm" @bind-Value="filter.ToDate" />
+                </div>
+
+                <div class="filter-field filter-status">
+                    <label class="form-label">Status</label>
+                    <InputSelect class="form-select form-select-sm" @bind-Value="filter.Status">
+                        <option>Active</option>
+                        <option>Cancelled</option>
+                        <option>All</option>
+                    </InputSelect>
+                </div>
+
+                <div class="filter-actions">
+                    <button type="button" class="btn btn-primary btn-sm" disabled="@loading" @onclick="SearchAsync">Search</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@loading" @onclick="ResetAsync">Reset</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (loading)
+    {
+        <div class="text-center py-4">
+            <div class="spinner-border spinner-border-sm" role="status" aria-label="Loading"></div>
+            <span class="ms-2">Loading cases...</span>
+        </div>
+    }
+    else if (!string.IsNullOrWhiteSpace(error))
+    {
+        <div class="alert alert-danger">@error</div>
+    }
+    else if (result is null || result.Items.Count == 0)
+    {
+        <div class="alert alert-info">No cases found.</div>
+    }
+    else
+    {
+        <div class="table-responsive cases-table-container">
+            <table class="table table-sm table-bordered align-middle case-table">
+                <thead>
+                    <tr>
+                        @SortHeader("CaseId", "Case ID")
+                        @SortHeader("CaseDate", "Date")
+                        @SortHeader("Doctor", "Doctor")
+                        @SortHeader("Patient", "Patient")
+                        <th>Teeth / Arch</th>
+                        <th>Type</th>
+                        @if (canSeePrices) { <th class="text-end">Unit Rate</th> }
+                        <th class="text-end">Units</th>
+                        @if (canSeePrices)
+                        {
+                            <th class="text-end">Unit Amount</th>
+                            <th class="text-end">Total Amount</th>
+                        }
+                        @SortHeader("CreatedBy", "Created By")
+                        @SortHeader("Status", "Status")
+                        <th class="text-center">View</th>
+                    </tr>
+                </thead>
+                @foreach (var item in result.Items)
+                {
+                    var rowSpan = Math.Max(item.Lines.Count, 1);
+
+                    <tbody class="case-group" @key="item.CaseId">
+                        @for (var index = 0; index < item.Lines.Count; index++)
+                        {
+                            var line = item.Lines[index];
+                            <tr class="@(item.IsCancelled ? "cancelled-case" : null)">
+                                @if (index == 0)
+                                {
+                                    <td rowspan="@rowSpan" class="case-id-cell">#@item.CaseId</td>
+                                    <td rowspan="@rowSpan" class="text-nowrap">@item.CaseDate.ToString("dd/MM/yyyy")</td>
+                                    <td rowspan="@rowSpan">@item.DoctorName</td>
+                                    <td rowspan="@rowSpan">
+                                        <div class="patient-cell">
+                                            <span>@DisplayValue(item.PatientName)</span>
+                                            @if (!string.IsNullOrWhiteSpace(item.PatientRef))
+                                            {
+                                                <small class="text-muted">@item.PatientRef</small>
+                                            }
+                                        </div>
+                                    </td>
+                                }
+
+                                <td class="teeth-cell">
+                                    <CompactToothGrid Scope="@line.Scope" Arch="@line.Arch" UR="@line.UR" UL="@line.UL" LR="@line.LR" LL="@line.LL" />
+                                </td>
+                                <td><span class="@Badge(line.CaseTypeCode)">@line.CaseTypeCode</span></td>
+                                @if (canSeePrices)
+                                {
+                                    <td class="text-end text-nowrap">@line.UnitRate.ToString("N2")</td>
+                                }
+                                <td class="text-end">@line.Units</td>
+                                @if (canSeePrices)
+                                {
+                                    <td class="text-end text-nowrap">@line.Amount.ToString("N2")</td>
+                                }
+
+                                @if (index == 0)
+                                {
+                                    @if (canSeePrices)
+                                    {
+                                        <td rowspan="@rowSpan" class="text-end text-nowrap total-amount-cell">@item.TotalAmount.ToString("N2")</td>
+                                    }
+                                    <td rowspan="@rowSpan" class="created-by-cell">@DisplayValue(item.CreatedBy)</td>
+                                    <td rowspan="@rowSpan">
+                                        @if (item.IsCancelled)
+                                        {
+                                            <span class="badge text-bg-secondary">Cancelled</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge text-bg-success">Active</span>
+                                        }
+                                    </td>
+                                    <td rowspan="@rowSpan" class="text-center">
+                                        <a class="btn btn-sm btn-outline-primary view-button" href="@($"/cases/{item.CaseId}")">View</a>
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                }
+            </table>
+        </div>
+
+        <div class="pagination-bar">
+            <span>
+                Page @result.PageNumber of @result.TotalPages
+                <span class="text-muted">(@result.TotalCount total)</span>
+            </span>
+            <div class="d-flex align-items-center gap-2">
+                <label class="text-muted">Rows</label>
+                <select class="form-select form-select-sm page-size" value="@filter.PageSize" @onchange="SizeChangedAsync">
+                    <option value="10">10</option>
+                    <option value="20">20</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(!result.HasPreviousPage || loading)" @onclick="PreviousAsync">Previous</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(!result.HasNextPage || loading)" @onclick="NextAsync">Next</button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private readonly CaseFilter filter = new();
+    private List<Doctor> doctors = [];
+    private PagedResult<CaseListItem>? result;
+    private bool loading;
+    private string? error;
+    private bool canSeePrices;
+    private bool canCreate;
+
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Prices (rates / amounts) are visible to Owner and Admin only - never to Staff
+        var user = (await AuthenticationStateTask).User;
+        canSeePrices = Permissions.IsAllowed(user, Perm.CasesViewPrices);
+        canCreate = Permissions.IsAllowed(user, Perm.CasesCreate);
+
+        doctors = await DoctorService.GetAllAsync();
+        await LoadAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        filter.PageNumber = 1;
+        await LoadAsync();
+    }
+
+    private RenderFragment SortHeader(string column, string label)
+    {
+        var isActive = filter.SortColumn == column;
+        var cssClass = "sortable-th" + (isActive ? " sort-active" : "");
+        var icon = isActive ? (filter.SortDescending ? "\u25bc" : "\u25b2") : "\u2195";
+
+        return @<th class="@cssClass" @onclick="() => SortByAsync(column)">@label<span class="sort-icon">@icon</span></th>;
+    }
+
+    private async Task SortByAsync(string column)
+    {
+        if (filter.SortColumn == column)
+        {
+            filter.SortDescending = !filter.SortDescending;
+        }
+        else
+        {
+            filter.SortColumn = column;
+            filter.SortDescending = false;
+        }
+
+        filter.PageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        try { result = await CaseService.SearchAsync(filter); }
+        catch (Exception) { error = "Cases could not be loaded. Please try again."; }
+        finally { loading = false; }
+    }
+
+    private async Task ResetAsync()
+    {
+        filter.CaseId = null;
+        filter.DocId = null;
+        filter.Patient = null;
+        filter.FromDate = null;
+        filter.ToDate = null;
+        filter.Status = "Active";
+        filter.PageNumber = 1;
+        await LoadAsync();
+    }
+
+    private async Task PreviousAsync()
+    {
+        if (result?.HasPreviousPage != true) return;
+        filter.PageNumber--;
+        await LoadAsync();
+    }
+
+    private async Task NextAsync()
+    {
+        if (result?.HasNextPage != true) return;
+        filter.PageNumber++;
+        await LoadAsync();
+    }
+
+    private async Task SizeChangedAsync(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), out var pageSize)) filter.PageSize = pageSize;
+        filter.PageNumber = 1;
+        await LoadAsync();
+    }
+
+    private static string DisplayValue(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value;
+
+    private static string Badge(string code)
+    {
+        var colour = code switch
+        {
+            "CR" => "text-bg-primary",
+            "ZR" => "text-bg-success",
+            "DMLS" => "text-bg-info",
+            "IMP_DMLS" => "text-bg-warning",
+            "DENTURE" => "text-bg-danger",
+            "RETAINER" => "text-bg-teal",
+            _ => "text-bg-secondary"
+        };
+        return $"badge case-badge {colour}";
+    }
+}

@@ -1,0 +1,185 @@
+# ==========================================================
+# Natural Dental Lab Operations Platform
+# .NET / Visual Studio / Rider / VS Code ignore rules
+# ==========================================================
+
+# Build output
+[Bb]in/
+[Oo]bj/
+[Aa]rtifacts/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.rsuser
+*.VC.db
+*.VC.VC.opendb
+
+# JetBrains Rider / ReSharper
+.idea/
+_ReSharper*/
+*.DotSettings.user
+*.sln.iml
+
+# VS Code local workspace settings
+.vscode/
+
+# Test results and coverage
+TestResults/
+[Tt]est[Rr]esult*/
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
+*.trx
+*.testlog
+
+# Benchmark and profiler output
+BenchmarkDotNet.Artifacts/
+*.psess
+*.vsp
+*.vspx
+*.sap
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+!**/.nuget/packages.config
+
+# Local tools and generated files
+.dotnet/
+.tools/
+.generated/
+generated/
+exports/
+reports/output/
+
+# Logs
+[Ll]ogs/
+*.log
+*.log.*
+
+# Local environment and secret files
+.env
+.env.*
+!.env.example
+secrets.json
+appsettings.Local.json
+appsettings.*.Local.json
+appsettings.*.local.json
+
+# Keep safe configuration templates
+!appsettings.json
+!appsettings.Development.json
+!appsettings.example.json
+
+# User Secrets are stored outside the repository, but ignore accidental copies
+**/UserSecrets/
+**/usersecrets/
+
+# Certificates and private keys
+*.pfx
+*.p12
+*.p7b
+*.p7c
+*.key
+*.pem
+*.cer
+*.crt
+
+# Azure and publish output
+*.publishsettings
+*.pubxml.user
+**/Properties/PublishProfiles/*.user
+**/Properties/ServiceDependencies/*.json.user
+.azure/
+
+# Local databases, backups and data exports
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.mdf
+*.ldf
+*.ndf
+*.bak
+*.bacpac
+*.dacpac
+*.bcp
+
+# Patient/doctor data exports must never be committed
+patient-data/
+doctor-data/
+production-data/
+private-data/
+*.patient.csv
+*.patients.csv
+*.doctor-export.csv
+*.case-export.csv
+
+# EF Core temporary and generated SQL previews
+migration-preview.sql
+migration-script.sql
+Database/Generated/
+database/generated/
+
+# SMTP and Identity diagnostic exports
+email-diagnostics/
+identity-diagnostics/
+
+# Node assets, if frontend tooling is introduced
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Backup and temporary files
+*.tmp
+*.temp
+*.bak~
+*.orig
+*.rej
+*.swp
+*.swo
+*~
+
+# Archives generated for transfer
+*.7z
+*.rar
+*.tar
+*.tar.gz
+
+# Keep repository documentation ZIP files out of source control by default
+*.zip
+
+# Do not ignore these repository files
+!.github/
+!docs/
+!database/
+!scripts/

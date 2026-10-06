@@ -1,0 +1,10 @@
+<Solution>
+  <Project Path="DentalLab.Application/DentalLab.Application.csproj" />
+  <Project Path="DentalLab.Database/DentalLab.Database.sqlproj" Id="1c43f749-d872-4beb-83fd-f9eeabc60dc8">
+    <Build />
+    <Deploy />
+  </Project>
+  <Project Path="DentalLab.Domain/DentalLab.Domain.csproj" />
+  <Project Path="DentalLab.Infrastructure/DentalLab.Infrastructure.csproj" />
+  <Project Path="DentalLab.Web/DentalLab.Web.csproj" />
+</Solution>

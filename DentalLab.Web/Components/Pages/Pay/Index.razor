@@ -1,0 +1,85 @@
+@page "/pay/{Token}"
+@layout DentalLab.Web.Components.Layout.AuthLayout
+@attribute [ExcludeFromInteractiveRouting]
+
+@using DentalLab.Web.Payments
+
+@inject PayLinkService PayLinks
+
+@* Public page (no login). Opened from the "Tap here to pay" link on a bill.
+   Shows only the payee, amount and note sealed inside the link. *@
+
+<PageTitle>Pay @(request is null ? "" : UpiPayment.AmountLabel(request.Amount)) – Natural Dental Labs</PageTitle>
+
+<div class="pay-wrap">
+    <div class="pay-card" data-pay-card>
+        <div class="pay-brand">
+            <img src="/images/logo.png" alt="" />
+            <span>Natural Dental Labs</span>
+        </div>
+
+        @if (request is null)
+        {
+            <h1 class="pay-title">This payment link is not valid</h1>
+            <p class="pay-muted">
+                It may have expired or been changed. Please ask Natural Dental Labs for a new bill,
+                or pay using the UPI ID printed on your bill.
+            </p>
+        }
+        else
+        {
+            <p class="pay-muted mb-1">Amount to pay</p>
+            <div class="pay-amount">@UpiPayment.AmountLabel(request.Amount)</div>
+
+            <dl class="pay-details">
+                <div><dt>Pay to</dt><dd>@request.PayeeName</dd></div>
+                <div><dt>UPI ID</dt><dd>@request.UpiId</dd></div>
+                @if (!string.IsNullOrWhiteSpace(request.Note))
+                {
+                    <div><dt>For</dt><dd>@request.Note</dd></div>
+                }
+            </dl>
+
+            <div class="pay-desktop-note" role="note">
+                <strong>You're on a computer.</strong>
+                UPI apps only open on a phone. Scan the QR code below with PhonePe, Google Pay or any UPI app,
+                or open this page on your phone.
+            </div>
+
+            <a class="pay-main" href="@link">Pay with UPI app</a>
+            <p class="pay-hint">Opens PhonePe, Google Pay, Paytm or any UPI app with the amount filled in. You only enter your UPI PIN.</p>
+
+            <div class="pay-apps" aria-label="Open in a specific app">
+                @foreach (var app in UpiPayment.AppLinks(request))
+                {
+                    <a class="pay-app" href="@app.Link">Open in @app.App</a>
+                }
+            </div>
+
+            <div class="pay-qr">
+                <img src="@qr" alt="UPI QR code for @UpiPayment.AmountLabel(request.Amount)" width="200" height="200" />
+                <p class="pay-hint">On a computer, or if the buttons don't open an app: scan this code with any UPI app.</p>
+            </div>
+
+            <p class="pay-foot">After paying, please share the payment screenshot or transaction ID with Natural Dental Labs.</p>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public string? Token { get; set; }
+
+    private UpiPayRequest? request;
+    private string link = "";
+    private string qr = "";
+
+    protected override void OnParametersSet()
+    {
+        request = PayLinks.ReadToken(Token);
+        if (request is not null)
+        {
+            link = UpiPayment.BuildLink(request);
+            qr = UpiPayment.QrDataUri(link);
+        }
+    }
+}

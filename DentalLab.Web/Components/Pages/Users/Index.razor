@@ -1,0 +1,419 @@
+﻿@page "/users"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.UsersManage)]
+
+@using System.Security.Claims
+@using DentalLab.Application.Abstractions
+@using DentalLab.Application.Models
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+
+@inject IUserManagementService UserManagementService
+
+<PageTitle>User Management</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h3 class="mb-1">User Management</h3>
+        <p class="text-muted mb-0">
+            Create and manage application users according to your role.
+        </p>
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Loading...</p>
+}
+else if (!string.IsNullOrWhiteSpace(pageError))
+{
+    <div class="alert alert-danger">@pageError</div>
+}
+else
+{
+    <div class="row g-4">
+        <div class="col-xl-8">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>Users</span>
+                    <span class="badge bg-secondary">@users.Count</span>
+                </div>
+
+                <div class="card-body p-0">
+                    @if (users.Count == 0)
+                    {
+                        <div class="alert alert-info m-3">
+                            No manageable users were found.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        @SortHeader("Email", "Email")
+                                        @SortHeader("Role", "Role")
+                                        @SortHeader("EmailStatus", "Email Status")
+                                        <th>Invitation</th>
+                                        <th>Password</th>
+                                        @SortHeader("Account", "Account")
+                                        <th class="text-end">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var user in users)
+                                    {
+                                        <tr class="@(user.IsLocked ? "text-muted" : string.Empty)">
+                                            <td>@user.Email</td>
+                                            <td>
+                                                <span class="badge @RoleBadge(user.Role)">
+                                                    @user.Role
+                                                </span>
+                                            </td>
+                                            <td>
+                                                @if (user.EmailConfirmed)
+                                                {
+                                                    <span class="badge bg-success">Confirmed</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-warning text-dark">Unconfirmed</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <span class="badge @InvitationBadge(user.InvitationEmailStatus)"
+                                                      title="@user.InvitationEmailError">
+                                                    @user.InvitationEmailStatus
+                                                </span>
+                                                @if (user.InvitationEmailSentOn.HasValue)
+                                                {
+                                                    <div class="small text-muted text-nowrap">
+                                                        @user.InvitationEmailSentOn.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm")
+                                                    </div>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (user.MustChangePassword)
+                                                {
+                                                    <span class="badge bg-warning text-dark">Temporary</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-success">Changed</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-@(user.IsLocked ? "secondary" : "success")">
+                                                    @(user.IsLocked ? "Disabled" : "Active")
+                                                </span>
+                                            </td>
+                                            <td class="text-end text-nowrap">
+                                                @if (user.MustChangePassword ||
+                                                     !string.Equals(user.InvitationEmailStatus, "Sent", StringComparison.OrdinalIgnoreCase))
+                                                {
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-outline-primary me-1"
+                                                            disabled="@isProcessing"
+                                                            @onclick="() => ResendInvitationAsync(user)">
+                                                        Resend
+                                                    </button>
+                                                }
+
+                                                <button type="button"
+                                                        class="btn btn-sm @(user.IsLocked ? "btn-outline-success" : "btn-outline-secondary")"
+                                                        disabled="@isProcessing"
+                                                        @onclick="() => ToggleLockoutAsync(user)">
+                                                    @(user.IsLocked ? "Enable" : "Disable")
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-4">
+            <div class="card">
+                <div class="card-header">Create user</div>
+                <div class="card-body">
+                    @if (assignableRoles.Count == 0)
+                    {
+                        <div class="alert alert-warning mb-0">
+                            Your account cannot create users.
+                        </div>
+                    }
+                    else
+                    {
+                        <EditForm Model="request"
+                                  OnValidSubmit="CreateUserAsync"
+                                  FormName="createUserForm">
+                            <DataAnnotationsValidator />
+                            <ValidationSummary />
+
+                            <div class="mb-3">
+                                <label class="form-label">Email</label>
+                                <InputText class="form-control"
+                                           type="email"
+                                           autocomplete="off"
+                                           @bind-Value="request.Email" />
+                                <ValidationMessage For="() => request.Email" />
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Role</label>
+                                <InputSelect class="form-select"
+                                             @bind-Value="request.Role">
+                                    <option value="">-- select role --</option>
+                                    @foreach (var role in assignableRoles)
+                                    {
+                                        <option value="@role">@role</option>
+                                    }
+                                </InputSelect>
+                                <ValidationMessage For="() => request.Role" />
+                            </div>
+
+                            <div class="alert alert-info py-2">
+                                A secure temporary password will be generated automatically and sent to the email address through SMTP.
+                            </div>
+
+                            @if (!string.IsNullOrWhiteSpace(formError))
+                            {
+                                <div class="alert alert-danger">@formError</div>
+                            }
+
+                            @if (!string.IsNullOrWhiteSpace(successMessage))
+                            {
+                                <div class="alert alert-success">@successMessage</div>
+                            }
+
+                            <button type="submit"
+                                    class="btn btn-primary"
+                                    disabled="@isProcessing">
+                                @(isProcessing ? "Creating..." : "Create user")
+                            </button>
+                        </EditForm>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+
+    private readonly List<UserListItem> users = [];
+    private readonly List<string> assignableRoles = [];
+    private CreateUserRequest request = new();
+
+    private string currentUserId = string.Empty;
+    private string? pageError;
+    private string? formError;
+    private string? successMessage;
+    private bool isLoading = true;
+    private bool isProcessing;
+    private string sortColumn = "Email";
+    private bool sortDescending;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authenticationState = await AuthenticationStateTask;
+            currentUserId = authenticationState.User
+                .FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(currentUserId))
+            {
+                pageError = "The current user identifier could not be determined.";
+                return;
+            }
+
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            pageError = exception.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        var loadedUsers = await UserManagementService.GetUsersAsync(currentUserId);
+        var loadedRoles = await UserManagementService.GetAssignableRolesAsync(currentUserId);
+
+        users.Clear();
+        users.AddRange(loadedUsers);
+        ApplySort();
+
+        assignableRoles.Clear();
+        assignableRoles.AddRange(loadedRoles);
+    }
+
+    private void ApplySort()
+    {
+        Func<UserListItem, object?> keySelector = sortColumn switch
+        {
+            "Role" => x => x.Role,
+            "EmailStatus" => x => x.EmailConfirmed,
+            "Account" => x => x.IsLocked,
+            _ => x => x.Email
+        };
+
+        var sorted = (sortDescending
+            ? users.OrderByDescending(keySelector)
+            : users.OrderBy(keySelector)).ToList();
+
+        users.Clear();
+        users.AddRange(sorted);
+    }
+
+    private void SortBy(string column)
+    {
+        if (sortColumn == column) sortDescending = !sortDescending;
+        else { sortColumn = column; sortDescending = false; }
+        ApplySort();
+    }
+
+    private RenderFragment SortHeader(string column, string label)
+    {
+        var isActive = sortColumn == column;
+        var cssClass = "sortable-th" + (isActive ? " sort-active" : "");
+        var icon = isActive ? (sortDescending ? "\u25bc" : "\u25b2") : "\u2195";
+
+        return @<th class="@cssClass" @onclick="() => SortBy(column)">@label<span class="sort-icon">@icon</span></th>;
+    }
+
+    private async Task CreateUserAsync()
+    {
+        isProcessing = true;
+        formError = null;
+        successMessage = null;
+        pageError = null;
+
+        try
+        {
+            var createdEmail = request.Email.Trim();
+            var result = await UserManagementService.CreateUserAsync(
+                currentUserId,
+                request);
+
+            if (!result.Succeeded)
+            {
+                formError = result.ErrorMessage;
+                return;
+            }
+
+            successMessage = $"User '{createdEmail}' was created. Check the invitation status in the Users table.";
+            request = new CreateUserRequest();
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            formError = exception.Message;
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task ResendInvitationAsync(UserListItem user)
+    {
+        isProcessing = true;
+        pageError = null;
+        formError = null;
+        successMessage = null;
+
+        try
+        {
+            var result = await UserManagementService.ResendInvitationAsync(
+                currentUserId,
+                user.UserId);
+
+            if (!result.Succeeded)
+            {
+                pageError = result.ErrorMessage;
+                return;
+            }
+
+            successMessage = $"A new temporary password invitation was generated for '{user.Email}'.";
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            pageError = exception.Message;
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task ToggleLockoutAsync(UserListItem user)
+    {
+        isProcessing = true;
+        formError = null;
+        successMessage = null;
+        pageError = null;
+
+        try
+        {
+            var result = await UserManagementService.SetUserLockoutAsync(
+                currentUserId,
+                user.UserId,
+                lockUser: !user.IsLocked);
+
+            if (!result.Succeeded)
+            {
+                pageError = result.ErrorMessage;
+                return;
+            }
+
+            successMessage = user.IsLocked
+                ? $"User '{user.Email}' was enabled."
+                : $"User '{user.Email}' was disabled.";
+
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            pageError = exception.Message;
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private static string RoleBadge(string role)
+    {
+        return role switch
+        {
+            "Admin" => "bg-primary",
+            "Staff" => "bg-info text-dark",
+            _ => "bg-secondary"
+        };
+    }
+
+    private static string InvitationBadge(string status)
+    {
+        return status switch
+        {
+            "Sent" => "bg-success",
+            "Failed" => "bg-danger",
+            "Pending" => "bg-warning text-dark",
+            _ => "bg-secondary"
+        };
+    }
+}

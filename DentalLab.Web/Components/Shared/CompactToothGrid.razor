@@ -1,0 +1,3 @@
+@if (Scope == 'A') { <div class="arch-value">@(Arch == 'U' ? "UPPER ARCH" : "LOWER ARCH")</div> }
+else { <div class="compact-grid"><div class="right top">@Show(UR)</div><div class="left top">@Show(UL)</div><div class="right bottom">@Show(LR)</div><div class="left bottom">@Show(LL)</div></div> }
+@code { [Parameter] public char Scope {get;set;} [Parameter] public char? Arch {get;set;} [Parameter] public string? UR {get;set;} [Parameter] public string? UL {get;set;} [Parameter] public string? LR {get;set;} [Parameter] public string? LL {get;set;} private static string Show(string? v)=>string.IsNullOrWhiteSpace(v)?" ":v; }

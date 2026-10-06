@@ -1,0 +1,111 @@
+﻿@page "/cases/{CaseId:int}/request-change/{RequestType}"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Perm.CasesRequestChange)]
+
+@using System.Security.Claims
+@using DentalLab.Application.Abstractions
+@using DentalLab.Application.Models.Approvals
+@using DentalLab.Application.Models.Cases
+@using DentalLab.Application.Security
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+
+@inject ICaseService CaseService
+@inject ICaseApprovalService ApprovalService
+@inject NavigationManager Nav
+
+<PageTitle>Request Case Change</PageTitle>
+
+@if (loading)
+{
+    <p>Loading...</p>
+}
+else if (caseDetails is null)
+{
+    <div class="alert alert-warning">Case not found or already cancelled.</div>
+}
+else
+{
+    <h3>@(model.RequestType == CaseApprovalRequestTypes.Edit ? "Request Case Edit" : "Request Case Cancellation")</h3>
+    <p class="text-muted">Case #@CaseId · @caseDetails.DoctorName · @caseDetails.PatientName</p>
+
+    <EditForm Model="model" OnValidSubmit="SubmitAsync" FormName="caseApprovalRequestForm">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+        <div class="card" style="max-width:760px">
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Assign to Admin</label>
+                    <InputSelect class="form-select" @bind-Value="model.AssignedAdminUserId">
+                        <option value="">-- select admin --</option>
+                        @foreach (var admin in admins)
+                        {
+                            <option value="@admin.UserId">@admin.Email</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="() => model.AssignedAdminUserId" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Reason</label>
+                    <InputTextArea class="form-control" rows="4" @bind-Value="model.Reason" />
+                    <ValidationMessage For="() => model.Reason" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Additional details</label>
+                    <InputTextArea class="form-control" rows="3" @bind-Value="model.AdditionalDetails" />
+                    <ValidationMessage For="() => model.AdditionalDetails" />
+                </div>
+                @if (!string.IsNullOrWhiteSpace(error))
+                {
+                    <div class="alert alert-danger">@error</div>
+                }
+                <button class="btn btn-primary" disabled="@saving">@(saving ? "Submitting..." : "Submit request")</button>
+                <a class="btn btn-link" href="@($"/cases/{CaseId}")">Back</a>
+            </div>
+        </div>
+    </EditForm>
+}
+
+@code {
+    [Parameter] public int CaseId { get; set; }
+    [Parameter] public string RequestType { get; set; } = string.Empty;
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+
+    private CaseDetails? caseDetails;
+    private List<AdminOption> admins = [];
+    private CreateCaseApprovalRequest model = new();
+    private bool loading = true;
+    private bool saving;
+    private string? error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var normalized = RequestType.Equals("cancel", StringComparison.OrdinalIgnoreCase)
+            ? CaseApprovalRequestTypes.Cancel
+            : RequestType.Equals("edit", StringComparison.OrdinalIgnoreCase)
+                ? CaseApprovalRequestTypes.Edit
+                : string.Empty;
+        if (string.IsNullOrEmpty(normalized)) { loading = false; return; }
+        caseDetails = await CaseService.GetByIdAsync(CaseId);
+        if (caseDetails?.IsCancelled == true) caseDetails = null;
+        admins = await ApprovalService.GetActiveAdminsAsync();
+        model = new CreateCaseApprovalRequest { CaseId = CaseId, RequestType = normalized };
+        loading = false;
+    }
+
+    private async Task SubmitAsync()
+    {
+        saving = true;
+        error = null;
+        try
+        {
+            var state = await AuthenticationStateTask;
+            var userId = state.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
+            var email = state.User.FindFirstValue(ClaimTypes.Email) ?? state.User.Identity?.Name ?? string.Empty;
+            var result = await ApprovalService.CreateAsync(model, userId, email);
+            if (!result.Succeeded) { error = result.ErrorMessage; return; }
+            Nav.NavigateTo($"/approval-requests/{result.RequestId}");
+        }
+        finally { saving = false; }
+    }
+}
