@@ -13,6 +13,10 @@
 @inject ICaseService CaseService
 @inject PermissionStore Permissions
 @inject IJSRuntime JS
+@inject NavigationManager Navigation
+@inject DentalLab.Web.Ledger.DoctorLedgerStore Ledger
+@inject DentalLab.Web.Ledger.DoctorBillBuilder BillBuilder
+@using DentalLab.Web.Ledger
 
 <PageTitle>Monthly Summary – @MonthLabel</PageTitle>
 
@@ -59,6 +63,10 @@
     @if (downloadError is not null)
     {
         <div class="alert alert-warning no-print">@downloadError</div>
+    }
+    @if (canDownloadBills && report is not null && report.Cases > 0)
+    {
+        <div class="ms-bill-hint no-print">Tip: click a doctor&rsquo;s name to download their @MonthLabel bill as a PDF.</div>
     }
 
     @if (loading)
@@ -251,7 +259,7 @@
                                 var share = canSeePrices ? Pct(d.Amount, r.Amount) : Pct(d.Units, r.Units);
                                 <tr>
                                     <td class="num">@(i + 1)</td>
-                                    <td><strong>@d.Name</strong></td>
+                                    <td>@DoctorName(d.DocId, d.Name)</td>
                                     <td class="num">@d.Cases</td>
                                     <td class="num">@d.Units</td>
                                     @if (canSeePrices)
@@ -281,6 +289,62 @@
                         </tfoot>
                     </table>
                 </section>
+
+                @* ---------------- Old dues & collections ---------------- *@
+                @if (dues is { BeforeTracking: false } md && md.Doctors.Count > 0)
+                {
+                    var pd = prevDues is { BeforeTracking: false } ? prevDues : null;
+                    <section class="ms-block ms-dues">
+                        <h2>Old dues &amp; collections <small>money carried in, billed, received and still pending</small></h2>
+                        <div class="ms-dues-kpis">
+                            <div><span>Old due brought forward</span><strong>@Signed(md.OldDue)</strong>@Delta(md.OldDue, pd?.OldDue ?? 0)</div>
+                            <div><span>Billed this month</span><strong>@Money(md.Billed)</strong>@Delta(md.Billed, pd?.Billed ?? 0)</div>
+                            <div class="main"><span>Total payable (with old due)</span><strong>@Signed(md.TotalPayable)</strong>@Delta(md.TotalPayable, pd?.TotalPayable ?? 0)</div>
+                            <div class="paid"><span>Received</span><strong>@Money(md.Received)</strong>@Delta(md.Received, pd?.Received ?? 0)</div>
+                            <div class="due"><span>Pending at month end</span><strong>@Signed(md.Closing)</strong><span class="ms-kpi-sub">@md.DoctorsWithDues doctor(s) &middot; collected @md.CollectionPercent%</span></div>
+                        </div>
+                        <table class="ms-table">
+                            <thead>
+                                <tr>
+                                    <th>Doctor</th>
+                                    <th class="num">Old due</th>
+                                    <th class="num">This month</th>
+                                    <th class="num">Total payable</th>
+                                    <th class="num">Received</th>
+                                    <th class="num">Pending</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in md.Doctors.OrderByDescending(x => x.Closing).ThenBy(x => x.DoctorName))
+                                {
+                                    <tr>
+                                        <td>@DoctorName(row.DocId, row.DoctorName)</td>
+                                        <td class="num">@Signed(row.OldDue)</td>
+                                        <td class="num">@Money(row.Billed)</td>
+                                        <td class="num">@Signed(row.TotalPayable)</td>
+                                        <td class="num ms-paid">@Money(row.Received)</td>
+                                        <td class="num @(row.Closing > 0.004m ? "ms-due" : "ms-paid")"><strong>@Signed(row.Closing)</strong></td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td>Total (@md.Doctors.Count doctors)</td>
+                                    <td class="num">@Signed(md.OldDue)</td>
+                                    <td class="num">@Money(md.Billed)</td>
+                                    <td class="num">@Signed(md.TotalPayable)</td>
+                                    <td class="num">@Money(md.Received)</td>
+                                    <td class="num">@Signed(md.Closing)</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                        <p class="ms-note">Old due = pending at the start of @MonthLabel (opening balances, earlier work and saved bill extras, less payments). Pending at month end becomes next month&rsquo;s old due. Dues are tracked from @md.TrackingStart.ToString("dd MMM yyyy").</p>
+                    </section>
+                }
+                else if (dues is { BeforeTracking: true })
+                {
+                    <p class="ms-note no-print">Old dues are tracked from @dues.TrackingStart.ToString("dd MMM yyyy"), so this month has no dues section.</p>
+                }
 
                 @* ---------------- Daily activity ---------------- *@
                 <section class="ms-block ms-keep">
@@ -352,6 +416,13 @@
     private DateTime generatedAt;
     private MonthlySummaryReport? report;
 
+    // ---- old dues (needs "See prices" and "View dues & payments") ----
+    private bool canSeeDues;
+    private bool canDownloadBills;
+    private MonthLedger? dues;
+    private MonthLedger? prevDues;
+    private int? billDownloadingId;
+
     private string MonthLabel =>
         new DateTime(year, month, 1).ToString("MMMM yyyy", CultureInfo.InvariantCulture);
 
@@ -359,6 +430,8 @@
     {
         var user = (await AuthenticationStateTask).User;
         canSeePrices = Permissions.IsAllowed(user, Perm.CasesViewPrices);
+        canSeeDues = canSeePrices && Permissions.IsAllowed(user, Perm.PaymentsView);
+        canDownloadBills = Permissions.IsAllowed(user, Perm.BillingView);
         preparedBy = user.FindFirstValue(ClaimTypes.Email) ?? user.Identity?.Name ?? "-";
         await LoadAsync();
     }
@@ -398,6 +471,23 @@
 
             report = MonthlySummaryReport.Build(from, to, current, previous, cancelled.Count);
             generatedAt = DateTime.Now;
+
+            dues = null;
+            prevDues = null;
+            if (canSeeDues)
+            {
+                try
+                {
+                    dues = await Ledger.GetMonthAsync(from);
+                    prevDues = await Ledger.GetMonthAsync(prevFrom);
+                }
+                catch (Exception)
+                {
+                    // The production summary still shows; only the dues section is left out.
+                    dues = null;
+                    prevDues = null;
+                }
+            }
         }
         catch (Exception)
         {
@@ -458,7 +548,8 @@
         {
             var current = report;
             var label = MonthLabel;
-            var bytes = await Task.Run(() => MonthlySummaryPdf.Generate(current, label, preparedBy, generatedAt, canSeePrices));
+            var monthDues = dues is { BeforeTracking: false } && dues.Doctors.Count > 0 ? dues : null;
+            var bytes = await Task.Run(() => MonthlySummaryPdf.Generate(current, label, preparedBy, generatedAt, canSeePrices, monthDues));
 
             var fileName = $"MonthlySummary_{new DateTime(year, month, 1):MMMyyyy}.pdf";
             using var stream = new MemoryStream(bytes);
@@ -475,7 +566,76 @@
         }
     }
 
+    // ------------------------------------------------------------------ doctor bills
+
+    /// <summary>Doctor name; a button that downloads the doctor's bill for this month when allowed.</summary>
+    private RenderFragment DoctorName(int docId, string name) => builder =>
+    {
+        if (!canDownloadBills || docId <= 0)
+        {
+            builder.OpenElement(0, "strong");
+            builder.AddContent(1, name);
+            builder.CloseElement();
+            return;
+        }
+
+        var busy = billDownloadingId == docId;
+        builder.OpenElement(2, "button");
+        builder.AddAttribute(3, "type", "button");
+        builder.AddAttribute(4, "class", busy ? "ms-doc-link is-busy" : "ms-doc-link");
+        builder.AddAttribute(5, "title", $"Download {name}'s {MonthLabel} bill (PDF)");
+        builder.AddAttribute(6, "disabled", billDownloadingId is not null);
+        builder.AddAttribute(7, "onclick", EventCallback.Factory.Create(this, () => DownloadBillAsync(docId)));
+        builder.AddContent(8, name);
+        builder.OpenElement(9, "span");
+        builder.AddAttribute(10, "class", "ms-doc-icon no-print");
+        builder.AddAttribute(11, "aria-hidden", "true");
+        builder.AddContent(12, busy ? " \u2026" : " \u2193");
+        builder.CloseElement();
+        builder.CloseElement();
+    };
+
+    private async Task DownloadBillAsync(int docId)
+    {
+        if (billDownloadingId is not null)
+        {
+            return;
+        }
+
+        billDownloadingId = docId;
+        downloadError = null;
+        try
+        {
+            var from = new DateOnly(year, month, 1);
+            var to = from.AddMonths(1).AddDays(-1);
+            var today = DateOnly.FromDateTime(DateTime.Today);
+            if (to > today) { to = today; }
+
+            var bill = await BillBuilder.BuildAsync(docId, from, to, Navigation.BaseUri);
+            if (bill is null)
+            {
+                downloadError = "That doctor could not be found.";
+                return;
+            }
+
+            using var stream = new MemoryStream(bill.Pdf);
+            using var streamRef = new DotNetStreamReference(stream);
+            await JS.InvokeVoidAsync("downloadFileFromStream", bill.FileName, streamRef, "application/pdf");
+        }
+        catch (Exception)
+        {
+            downloadError = "The bill could not be created. Please try again, or open it from the Doctor Bill page.";
+        }
+        finally
+        {
+            billDownloadingId = null;
+        }
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    /// <summary>Money with a proper minus sign for credits.</summary>
+    private static string Signed(decimal value) => value < 0 ? "\u2212" + Money(-value) : Money(value);
 
     private static string Money(decimal value, int decimals = 2) =>
         "\u20b9" + value.ToString(decimals == 0 ? "N0" : "N2", CultureInfo.GetCultureInfo("en-IN"));

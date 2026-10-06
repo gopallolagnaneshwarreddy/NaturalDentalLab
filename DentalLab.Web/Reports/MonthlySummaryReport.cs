@@ -82,7 +82,8 @@ public sealed class MonthlySummaryReport
                     g.Sum(c => c.TotalAmount),
                     topType,
                     p.Units,
-                    p.Amount);
+                    p.Amount,
+                    g.Key);
             })
             .OrderByDescending(d => d.Amount).ThenByDescending(d => d.Units)
             .ToList();
@@ -151,7 +152,7 @@ public sealed class MonthlySummaryReport
 }
 
 public sealed record TypeRow(string Code, string Name, char Scope, int Cases, int Units, decimal Amount);
-public sealed record DoctorRow(string Name, int Cases, int Units, decimal Amount, string TopType, int PrevUnits, decimal PrevAmount);
+public sealed record DoctorRow(string Name, int Cases, int Units, decimal Amount, string TopType, int PrevUnits, decimal PrevAmount, int DocId = 0);
 public sealed record DayRow(DateOnly Date, int Cases, int Units, bool IsSunday);
 public sealed record WeekRow(string Label, int Cases, int Units);
 public sealed record UserRow(string Name, int Cases, int Units);

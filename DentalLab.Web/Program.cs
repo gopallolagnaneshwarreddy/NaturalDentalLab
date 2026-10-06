@@ -96,6 +96,7 @@ namespace DentalLab.Web
             builder.Services.AddSingleton<DentalLab.Web.Settings.AppSettingsStore>();
             // Doctor payments, opening balances and saved bills (old due carry-forward)
             builder.Services.AddSingleton<DentalLab.Web.Ledger.DoctorLedgerStore>();
+            builder.Services.AddScoped<DentalLab.Web.Ledger.DoctorBillBuilder>();
 
             var app = builder.Build();
 

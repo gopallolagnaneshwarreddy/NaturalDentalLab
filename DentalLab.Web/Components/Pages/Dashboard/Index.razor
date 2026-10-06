@@ -12,6 +12,9 @@
 @using Microsoft.AspNetCore.Components.Authorization
 
 @inject IDashboardService DashboardService
+@inject DentalLab.Web.Ledger.DoctorLedgerStore Ledger
+@inject PermissionStore Permissions
+@using DentalLab.Web.Ledger
 
 <PageTitle>Dental Lab Dashboard</PageTitle>
 
@@ -116,6 +119,115 @@
             <MetricCard Title="Pending requests" Value="@data.Summary.PendingRequests.ToString("N0")" Caption="Waiting for review" Tone="amber" Icon="!" />
             <MetricCard Title="Awaiting action" Value="@data.Summary.ApprovedAwaitingAction.ToString("N0")" Caption="Approved, not completed" Tone="rose" Icon="A" />
         </section>
+
+        @if (canSeeDues)
+        {
+            <section class="dashboard-card dash-dues" aria-labelledby="dashDuesTitle">
+                <header class="dash-dues-head">
+                    <div>
+                        <span class="dash-dues-kicker">Payments &amp; dues</span>
+                        <h2 id="dashDuesTitle">Collections for @SelectedPeriod</h2>
+                    </div>
+                    <div class="dash-dues-links">
+                        @if (monthDues is { BeforeTracking: false })
+                        {
+                            <span class="dash-dues-chip">Collected @monthDues.CollectionPercent% of payable</span>
+                        }
+                        <a class="dash-dues-link" href="doctor-payments">Doctor Payments &rarr;</a>
+                    </div>
+                </header>
+
+                @if (duesError is not null)
+                {
+                    <div class="dash-dues-empty">@duesError</div>
+                }
+                else if (monthDues is null)
+                {
+                    <div class="dash-dues-empty">Loading dues&hellip;</div>
+                }
+                else if (monthDues.BeforeTracking)
+                {
+                    <div class="dash-dues-empty">Dues are tracked from @monthDues.TrackingStart.ToString("dd MMM yyyy"). Pick a later month to see collections.</div>
+                }
+                else
+                {
+                    var cur = monthDues;
+                    var prev = prevDues is { BeforeTracking: false } ? prevDues : null;
+                    var prevName = new DateTime(filter.Year, filter.Month, 1).AddMonths(-1).ToString("MMM");
+
+                    <div class="dash-dues-tiles">
+                        <div class="dash-dues-tile">
+                            <span class="label">Old due brought forward</span>
+                            <strong>@Rupees(cur.OldDue)</strong>
+                            @DuesDelta(cur.OldDue, prev?.OldDue, prevName, false)
+                        </div>
+                        <div class="dash-dues-tile">
+                            <span class="label">Billed this month <em>without old due</em></span>
+                            <strong>@Rupees(cur.Billed)</strong>
+                            @DuesDelta(cur.Billed, prev?.Billed, prevName, true)
+                        </div>
+                        <div class="dash-dues-tile is-main">
+                            <span class="label">Total payable <em>with old due</em></span>
+                            <strong>@Rupees(cur.TotalPayable)</strong>
+                            @DuesDelta(cur.TotalPayable, prev?.TotalPayable, prevName, false)
+                        </div>
+                        <div class="dash-dues-tile is-paid">
+                            <span class="label">Payments received</span>
+                            <strong>@Rupees(cur.Received)</strong>
+                            @DuesDelta(cur.Received, prev?.Received, prevName, true)
+                        </div>
+                        <div class="dash-dues-tile is-due">
+                            <span class="label">Payments pending <em>at month end</em></span>
+                            <strong>@Rupees(cur.Closing)</strong>
+                            @DuesDelta(cur.Closing, prev?.Closing, prevName, false)
+                            <small>@cur.DoctorsWithDues doctor(s) with dues</small>
+                        </div>
+                    </div>
+
+                    <div class="dash-dues-collect" role="img" aria-label="@($"Collected {cur.CollectionPercent}% of the total payable")">
+                        <div class="bar"><span style="width:@cur.CollectionPercent%"></span></div>
+                        <div class="legend">
+                            <span><i class="dot paid"></i>Received @Rupees(cur.Received)</span>
+                            <span><i class="dot due"></i>Pending @Rupees(Math.Max(0, cur.Closing))</span>
+                            @if (prev is not null)
+                            {
+                                <span class="muted">@prevName: collected @prev.CollectionPercent%</span>
+                            }
+                        </div>
+                    </div>
+
+                    @if (TopPending.Any())
+                    {
+                        <div class="table-responsive">
+                            <table class="table dashboard-table dash-dues-table align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Doctor</th>
+                                        <th class="text-end">Old due</th>
+                                        <th class="text-end">This month</th>
+                                        <th class="text-end">Received</th>
+                                        <th class="text-end">Pending</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var d in TopPending)
+                                    {
+                                        <tr>
+                                            <td><a class="dash-dues-doc" href="@($"doctor-payments?doc={d.DocId}")">@d.DoctorName</a></td>
+                                            <td class="text-end">@Rupees(d.OldDue)</td>
+                                            <td class="text-end">@Rupees(d.Billed)</td>
+                                            <td class="text-end paid">@Rupees(d.Received)</td>
+                                            <td class="text-end fw-semibold due">@Rupees(d.Closing)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="dash-dues-note">Top @TopPending.Count() doctors by pending amount. &ldquo;This month&rdquo; is work billed in @PeriodSoFar.</p>
+                    }
+                }
+            </section>
+        }
 
         <section class="dashboard-grid dashboard-grid-main">
             <article class="dashboard-card production-card">
@@ -367,6 +479,76 @@
     private bool loading = true;
     private string? error;
 
+    // ---- payments & dues (needs the "View dues & payments" permission) ----
+    private bool canSeeDues;
+    private MonthLedger? monthDues;
+    private MonthLedger? prevDues;
+    private string? duesError;
+
+    private bool IsCurrentMonth => filter.Year == DateTime.Today.Year && filter.Month == DateTime.Today.Month;
+
+    private IEnumerable<DoctorMonthPosition> TopPending =>
+        monthDues?.Doctors.Where(d => d.Closing > 0.004m).OrderByDescending(d => d.Closing).Take(6)
+        ?? Enumerable.Empty<DoctorMonthPosition>();
+
+    private string PeriodSoFar => IsCurrentMonth ? SelectedPeriod + " so far" : SelectedPeriod;
+
+    private async Task LoadDuesAsync()
+    {
+        if (!canSeeDues)
+        {
+            return;
+        }
+
+        duesError = null;
+        try
+        {
+            var month = new DateOnly(filter.Year, filter.Month, 1);
+            monthDues = await Ledger.GetMonthAsync(month, filter.DoctorId);
+            prevDues = await Ledger.GetMonthAsync(month.AddMonths(-1), filter.DoctorId);
+        }
+        catch (Exception)
+        {
+            monthDues = null;
+            prevDues = null;
+            duesError = "Payments and dues could not be loaded right now.";
+        }
+    }
+
+    /// <summary>₹1,23,456 (minus sign for a credit).</summary>
+    private static string Rupees(decimal value) =>
+        (value < 0 ? "\u2212" : "") + "\u20b9" + Math.Abs(value).ToString("N0", CultureInfo.GetCultureInfo("en-IN"));
+
+    /// <summary>Change vs last month. For billed / received, up is good; for dues, up is bad.</summary>
+    private static RenderFragment DuesDelta(decimal current, decimal? previous, string prevName, bool upIsGood) => builder =>
+    {
+        string text;
+        string css;
+        if (previous is null)
+        {
+            text = $"no data for {prevName}";
+            css = "flat";
+        }
+        else if (previous == 0)
+        {
+            text = current == 0 ? $"same as {prevName}" : $"{prevName}: \u20b90";
+            css = "flat";
+        }
+        else
+        {
+            var change = Math.Round((current - previous.Value) * 100m / Math.Abs(previous.Value), 1);
+            text = change == 0
+                ? $"same as {prevName}"
+                : $"{(change > 0 ? "\u25b2" : "\u25bc")} {Math.Abs(change):0.#}% vs {prevName} ({Rupees(previous.Value)})";
+            css = change == 0 ? "flat" : (change > 0) == upIsGood ? "good" : "bad";
+        }
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"dash-dues-delta {css}");
+        builder.AddContent(2, text);
+        builder.CloseElement();
+    };
+
     private bool IsOwner => currentRole == ApplicationRoles.Owner;
     private bool IsAdmin => currentRole == ApplicationRoles.Admin;
     private bool IsStaff => currentRole == ApplicationRoles.Staff;
@@ -441,6 +623,7 @@
             : auth.User.IsInRole(ApplicationRoles.Admin)
                 ? ApplicationRoles.Admin
                 : ApplicationRoles.Staff;
+        canSeeDues = Permissions.IsAllowed(auth.User, Perm.PaymentsView);
 
         await LoadAsync();
     }
@@ -456,6 +639,7 @@
                 currentUserId,
                 currentUserEmail,
                 currentRole);
+            await LoadDuesAsync();
         }
         catch (Exception exception)
         {

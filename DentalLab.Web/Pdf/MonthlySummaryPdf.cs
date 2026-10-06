@@ -1,3 +1,4 @@
+using DentalLab.Web.Ledger;
 using DentalLab.Web.Reports;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
@@ -8,7 +9,8 @@ namespace DentalLab.Web.Pdf;
 public static class MonthlySummaryPdf
 {
     /// <param name="showPrices">False hides every money figure (shares then use units).</param>
-    public static byte[] Generate(MonthlySummaryReport r, string monthLabel, string preparedBy, DateTime generatedAt, bool showPrices)
+    /// <param name="dues">Old dues and collections for the month (left out when null).</param>
+    public static byte[] Generate(MonthlySummaryReport r, string monthLabel, string preparedBy, DateTime generatedAt, bool showPrices, MonthLedger? dues = null)
     {
         PdfKit.Initialize();
 
@@ -22,7 +24,7 @@ public static class MonthlySummaryPdf
                 page.DefaultTextStyle(t => t.FontFamily(PdfKit.Font).FontSize(9).FontColor(PdfKit.Ink));
 
                 page.Header().Element(c => Letterhead(c, r, monthLabel, preparedBy, generatedAt));
-                page.Content().PaddingTop(10).Element(c => Body(c, r, monthLabel, showPrices));
+                page.Content().PaddingTop(10).Element(c => Body(c, r, monthLabel, showPrices, dues));
                 page.Footer().Element(c => Footer(c, monthLabel));
             });
         })
@@ -92,7 +94,7 @@ public static class MonthlySummaryPdf
 
     // ------------------------------------------------------------------ body
 
-    private static void Body(IContainer c, MonthlySummaryReport r, string monthLabel, bool showPrices)
+    private static void Body(IContainer c, MonthlySummaryReport r, string monthLabel, bool showPrices, MonthLedger? dues)
     {
         c.Column(col =>
         {
@@ -109,6 +111,10 @@ public static class MonthlySummaryPdf
             col.Item().EnsureSpace(60).Element(x => Split(x, r, showPrices));
             col.Item().Element(x => TypesTable(x, r, showPrices));
             col.Item().Element(x => DoctorsTable(x, r, showPrices));
+            if (showPrices && dues is { BeforeTracking: false } && dues.Doctors.Count > 0)
+            {
+                col.Item().EnsureSpace(140).Element(x => DuesTable(x, dues, monthLabel));
+            }
             col.Item().EnsureSpace(150).Element(x => Daily(x, r));
             if (r.EnteredBy.Count > 0)
             {
@@ -335,6 +341,80 @@ public static class MonthlySummaryPdf
             });
         });
     }
+
+    private static void DuesTable(IContainer c, MonthLedger d, string monthLabel)
+    {
+        c.Column(col =>
+        {
+            SectionTitle(col, "Old dues & collections");
+
+            col.Item().PaddingBottom(6).Table(t =>
+            {
+                t.ColumnsDefinition(cols => { for (var i = 0; i < 5; i++) cols.RelativeColumn(); });
+                var tiles = new (string Label, string Value, string Back, string Fore)[]
+                {
+                    ("Old due brought forward", Signed(d.OldDue), PdfKit.TealTint, PdfKit.Ink),
+                    ("Billed this month", PdfKit.Money(d.Billed), PdfKit.TealTint, PdfKit.Ink),
+                    ("Total payable", Signed(d.TotalPayable), PdfKit.Teal, "#FFFFFF"),
+                    ("Received", PdfKit.Money(d.Received), "#E7F6EE", PdfKit.Success),
+                    ("Pending at month end", Signed(d.Closing), "#FBEAE8", PdfKit.Danger)
+                };
+                foreach (var tile in tiles)
+                {
+                    t.Cell().Padding(2.5f).Background(tile.Back).CornerRadius(7).Padding(7).Column(tc =>
+                    {
+                        tc.Item().Text(tile.Label).FontSize(7).SemiBold().FontColor(tile.Fore == "#FFFFFF" ? "#C7EFE8" : PdfKit.Muted);
+                        tc.Item().Text(tile.Value).FontFamily(PdfKit.HeadingFont).FontSize(10.5f).Bold().FontColor(tile.Fore);
+                    });
+                }
+            });
+
+            col.Item().Table(t =>
+            {
+                t.ColumnsDefinition(cols =>
+                {
+                    cols.RelativeColumn(2);
+                    cols.ConstantColumn(70);
+                    cols.ConstantColumn(70);
+                    cols.ConstantColumn(74);
+                    cols.ConstantColumn(70);
+                    cols.ConstantColumn(74);
+                });
+
+                t.Header(h =>
+                {
+                    Head(h.Cell(), "Doctor");
+                    Head(h.Cell(), "Old due", true);
+                    Head(h.Cell(), "This month", true);
+                    Head(h.Cell(), "Total payable", true);
+                    Head(h.Cell(), "Received", true);
+                    Head(h.Cell(), "Pending", true);
+                });
+
+                foreach (var row in d.Doctors.OrderByDescending(x => x.Closing).ThenBy(x => x.DoctorName))
+                {
+                    Body(t.Cell()).Text(row.DoctorName).SemiBold();
+                    Body(t.Cell()).AlignRight().Text(Signed(row.OldDue));
+                    Body(t.Cell()).AlignRight().Text(PdfKit.Money(row.Billed));
+                    Body(t.Cell()).AlignRight().Text(Signed(row.TotalPayable));
+                    Body(t.Cell()).AlignRight().Text(PdfKit.Money(row.Received)).FontColor(PdfKit.Success);
+                    Body(t.Cell()).AlignRight().Text(Signed(row.Closing)).SemiBold().FontColor(row.Closing > 0.004m ? PdfKit.Danger : PdfKit.Success);
+                }
+
+                Foot(t.Cell()).Text($"Total ({d.Doctors.Count} doctors)").Bold();
+                Foot(t.Cell()).AlignRight().Text(Signed(d.OldDue)).Bold();
+                Foot(t.Cell()).AlignRight().Text(PdfKit.Money(d.Billed)).Bold();
+                Foot(t.Cell()).AlignRight().Text(Signed(d.TotalPayable)).Bold();
+                Foot(t.Cell()).AlignRight().Text(PdfKit.Money(d.Received)).Bold();
+                Foot(t.Cell()).AlignRight().Text(Signed(d.Closing)).Bold();
+            });
+
+            col.Item().PaddingTop(3).Text($"Old due = pending at the start of {monthLabel}. Pending at month end ({d.DoctorsWithDues} doctors, {d.CollectionPercent}% collected) becomes next month's old due.")
+                .FontSize(7.5f).FontColor(PdfKit.Muted);
+        });
+    }
+
+    private static string Signed(decimal value) => value < 0 ? "\u2212" + PdfKit.Money(-value) : PdfKit.Money(value);
 
     private static void Daily(IContainer c, MonthlySummaryReport r)
     {

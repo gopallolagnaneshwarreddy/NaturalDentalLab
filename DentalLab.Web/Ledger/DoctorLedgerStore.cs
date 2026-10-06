@@ -83,6 +83,30 @@ public sealed record OldDueInfo(
     public decimal OldDue => PreviousBalance - ReceivedInWindow;
 }
 
+/// <summary>One doctor's money for one month: what was carried in, billed, received and left over.</summary>
+public sealed record DoctorMonthPosition(int DocId, string DoctorName, decimal OldDue, decimal Billed, decimal Received)
+{
+    /// <summary>Old due + this month's work (what the bill asks for).</summary>
+    public decimal TotalPayable => OldDue + Billed;
+
+    /// <summary>Still pending at the end of the month (becomes next month's old due).</summary>
+    public decimal Closing => TotalPayable - Received;
+}
+
+/// <summary>All doctors for one month.</summary>
+public sealed record MonthLedger(DateOnly Month, DateOnly TrackingStart, bool BeforeTracking, List<DoctorMonthPosition> Doctors)
+{
+    public decimal OldDue => Doctors.Sum(d => d.OldDue);
+    public decimal Billed => Doctors.Sum(d => d.Billed);
+    public decimal Received => Doctors.Sum(d => d.Received);
+    public decimal TotalPayable => OldDue + Billed;
+    public decimal Closing => TotalPayable - Received;
+    public int DoctorsWithDues => Doctors.Count(d => d.Closing > 0.004m);
+
+    /// <summary>Share of what was payable that came in during the month (0-100).</summary>
+    public int CollectionPercent => TotalPayable <= 0 ? 0 : (int)Math.Round(Math.Min(Received, TotalPayable) * 100m / TotalPayable, MidpointRounding.AwayFromZero);
+}
+
 public enum LedgerEntryKind
 {
     Opening,
@@ -428,6 +452,74 @@ public sealed class DoctorLedgerStore
         }
 
         return list;
+    }
+
+    /// <summary>
+    /// Old due carried into <paramref name="month"/>, work billed in it, payments received in it and the
+    /// closing balance, per doctor. Months before tracking started come back empty with BeforeTracking set.
+    /// </summary>
+    public async Task<MonthLedger> GetMonthAsync(DateOnly month, int? docId = null, CancellationToken ct = default)
+    {
+        var start = await GetStartDateAsync();
+        var monthStart = FirstOfMonth(month);
+        var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+        if (monthEnd < start)
+        {
+            return new MonthLedger(monthStart, start, true, []);
+        }
+
+        var from = monthStart < start ? start : monthStart;
+        var list = new List<DoctorMonthPosition>();
+
+        await using var connection = await OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT d.DocId, d.DocName,
+                   ISNULL(ob.Amount, 0) + ISNULL(w.BeforeMonth, 0) + ISNULL(x.BeforeMonth, 0) - ISNULL(p.BeforeMonth, 0) AS OldDue,
+                   ISNULL(w.InMonth, 0) + ISNULL(x.InMonth, 0) AS Billed,
+                   ISNULL(p.InMonth, 0) AS Received
+            FROM dbo.Doctors AS d
+            LEFT JOIN dbo.DoctorOpeningBalances AS ob ON ob.DocId = d.DocId
+            LEFT JOIN (
+                SELECT DocId,
+                       SUM(CASE WHEN CaseDate <  @from THEN Amount ELSE 0 END) AS BeforeMonth,
+                       SUM(CASE WHEN CaseDate >= @from THEN Amount ELSE 0 END) AS InMonth
+                FROM dbo.Records
+                WHERE IsCancelled = 0 AND CaseDate >= @start AND CaseDate <= @end
+                GROUP BY DocId) AS w ON w.DocId = d.DocId
+            LEFT JOIN (
+                SELECT DocId,
+                       SUM(CASE WHEN PeriodTo <  @from THEN GstAmount + AdjustmentsTotal ELSE 0 END) AS BeforeMonth,
+                       SUM(CASE WHEN PeriodTo >= @from THEN GstAmount + AdjustmentsTotal ELSE 0 END) AS InMonth
+                FROM dbo.DoctorBills
+                WHERE PeriodFrom >= @start AND PeriodTo <= @end
+                GROUP BY DocId) AS x ON x.DocId = d.DocId
+            LEFT JOIN (
+                SELECT DocId,
+                       SUM(CASE WHEN PaymentDate <  @from THEN Amount ELSE 0 END) AS BeforeMonth,
+                       SUM(CASE WHEN PaymentDate >= @from THEN Amount ELSE 0 END) AS InMonth
+                FROM dbo.DoctorPayments
+                WHERE IsVoided = 0 AND PaymentDate >= @start AND PaymentDate <= @end
+                GROUP BY DocId) AS p ON p.DocId = d.DocId
+            WHERE (@doc IS NULL OR d.DocId = @doc)
+              AND (ob.DocId IS NOT NULL OR w.DocId IS NOT NULL OR x.DocId IS NOT NULL OR p.DocId IS NOT NULL)
+            ORDER BY d.DocName;
+            """;
+        AddDate(command, "@start", start);
+        AddDate(command, "@from", from);
+        AddDate(command, "@end", monthEnd);
+        Add(command, "@doc", SqlDbType.Int, docId);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var position = new DoctorMonthPosition(reader.GetInt32(0), reader.GetString(1), reader.GetDecimal(2), reader.GetDecimal(3), reader.GetDecimal(4));
+            if (position.OldDue != 0 || position.Billed != 0 || position.Received != 0)
+            {
+                list.Add(position);
+            }
+        }
+
+        return new MonthLedger(monthStart, start, false, list);
     }
 
     /// <summary>Old due for a bill covering <paramref name="from"/>.., counting payments up to <paramref name="paymentsUpTo"/>.</summary>

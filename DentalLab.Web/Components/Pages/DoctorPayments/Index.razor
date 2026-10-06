@@ -14,6 +14,9 @@
 @inject DoctorLedgerStore Ledger
 @inject PermissionStore Permissions
 @inject IJSRuntime JS
+@inject NavigationManager Navigation
+@inject DoctorBillBuilder BillBuilder
+@using DentalLab.Web.Pdf
 
 <PageTitle>Doctor Payments</PageTitle>
 
@@ -37,6 +40,11 @@
     @if (loadError is not null)
     {
         <div class="alert alert-danger">@loadError</div>
+    }
+
+    @if (downloadMessage is not null)
+    {
+        <div class="alert alert-warning py-2">@downloadMessage</div>
     }
 
     @if (loading)
@@ -206,6 +214,18 @@
                                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
                                     <span>Open bill</span>
                                 </a>
+                                <button type="button" class="act-btn act-secondary" disabled="@(downloading is not null)" @onclick="() => DownloadBillAsync(billDoc)"
+                                        title="Download the @BillPeriodLabel bill as PDF">
+                                    @if (downloading == "bill")
+                                    {
+                                        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                                    }
+                                    else
+                                    {
+                                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+                                    }
+                                    <span>Bill PDF</span>
+                                </button>
                             }
                         </div>
                     }
@@ -222,7 +242,20 @@
                     <h5 id="ppStatementTitle">@StatementTitle</h5>
                     @if (statement is not null && statementRows.Count > 0)
                     {
-                        <span class="pp-balance-chip @(statementRows[^1].Balance > 0.004m ? "is-due" : "is-clear")">Balance @Signed(statementRows[^1].Balance)</span>
+                        <div class="pp-tools">
+                            <span class="pp-balance-chip @(statementRows[^1].Balance > 0.004m ? "is-due" : "is-clear")">Balance @Signed(statementRows[^1].Balance)</span>
+                            <button type="button" class="act-btn act-secondary act-sm" disabled="@(downloading is not null)" @onclick="DownloadStatementAsync" title="Download this statement as PDF">
+                                @if (downloading == "statement")
+                                {
+                                    <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                                }
+                                else
+                                {
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+                                }
+                                <span>PDF</span>
+                            </button>
+                        </div>
                     }
                 </div>
                 <div class="pp-card-body pp-statement-body">
@@ -312,6 +345,17 @@
                         <input type="checkbox" @bind="onlyWithDues" />
                         <span>Only with dues</span>
                     </label>
+                    <button type="button" class="act-btn act-secondary act-sm" disabled="@(downloading is not null)" @onclick="DownloadDuesReportAsync" title="Download every doctor's dues as PDF">
+                        @if (downloading == "dues")
+                        {
+                            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                        }
+                        else
+                        {
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+                        }
+                        <span>Dues report</span>
+                    </button>
                 </div>
             </div>
             <div class="pp-card-body p-0">
@@ -356,7 +400,10 @@
                                             }
                                             @if (canBill)
                                             {
-                                                <a class="act-btn act-ghost act-sm" href="@($"doctor-bill?doc={row.DocId}")">Bill</a>
+                                                <a class="act-btn act-ghost act-sm" href="@($"doctor-bill?doc={row.DocId}")" title="Open the bill page">Bill</a>
+                                                <button type="button" class="icon-btn" disabled="@(downloading is not null)" title="Download @BillPeriodLabel bill (PDF)" aria-label="Download bill PDF for @row.DoctorName" @onclick="() => DownloadBillAsync(row.DocId)">
+                                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+                                                </button>
                                             }
                                         </td>
                                     </tr>
@@ -395,6 +442,17 @@
                         <input type="checkbox" @bind="showVoided" />
                         <span>Show voided</span>
                     </label>
+                    <button type="button" class="act-btn act-secondary act-sm" disabled="@(downloading is not null || history.Count == 0)" @onclick="DownloadPaymentsAsync" title="Download @historyMonth.ToString("MMMM yyyy") payments as PDF">
+                        @if (downloading == "payments")
+                        {
+                            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                        }
+                        else
+                        {
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+                        }
+                        <span>PDF</span>
+                    </button>
                 </div>
             </div>
             <div class="pp-card-body p-0">
@@ -589,6 +647,98 @@
     private bool savingSetup;
     private string? setupMessage;
     private bool setupError;
+
+    // ---- downloads ----
+    private string? downloading;          // "bill" | "statement" | "dues" | "payments"
+    private string? downloadMessage;
+
+    /// <summary>Bill period for quick downloads: last month in the first half of the month, otherwise this month so far.</summary>
+    private (DateOnly From, DateOnly To) BillPeriod
+    {
+        get
+        {
+            var today = DoctorLedgerStore.Today;
+            var from = DoctorLedgerStore.FirstOfMonth(today).AddMonths(today.Day <= 15 ? -1 : 0);
+            var to = from.AddMonths(1).AddDays(-1);
+            return (from, to > today ? today : to);
+        }
+    }
+
+    private string BillPeriodLabel => BillPeriod.From.ToString("MMM yyyy");
+
+    private async Task SaveFileAsync(string fileName, byte[] bytes)
+    {
+        using var stream = new MemoryStream(bytes);
+        using var streamRef = new DotNetStreamReference(stream);
+        await JS.InvokeVoidAsync("downloadFileFromStream", fileName, streamRef, "application/pdf");
+    }
+
+    private async Task RunDownloadAsync(string key, Func<Task> work)
+    {
+        if (downloading is not null)
+        {
+            return;
+        }
+
+        downloading = key;
+        downloadMessage = null;
+        try
+        {
+            await work();
+        }
+        catch (Exception)
+        {
+            downloadMessage = "The PDF could not be created. Please try again.";
+        }
+        finally
+        {
+            downloading = null;
+        }
+    }
+
+    private Task DownloadBillAsync(int docId) => RunDownloadAsync("bill", async () =>
+    {
+        var (from, to) = BillPeriod;
+        var bill = await BillBuilder.BuildAsync(docId, from, to, Navigation.BaseUri);
+        if (bill is null)
+        {
+            downloadMessage = "That doctor could not be found.";
+            return;
+        }
+
+        await SaveFileAsync(bill.FileName, bill.Pdf);
+    });
+
+    private Task DownloadStatementAsync() => RunDownloadAsync("statement", async () =>
+    {
+        if (selectedDocId is not { } docId || statementRows.Count == 0)
+        {
+            return;
+        }
+
+        var name = doctors.FirstOrDefault(d => d.DocId == docId)?.DocName ?? "Doctor";
+        var lines = statementRows.Select(r => new StatementLine(r.Entry, r.Balance)).ToList();
+        var due = SelectedDue;
+        var start = startDate;
+        var bytes = await Task.Run(() => LedgerPdf.Statement(name, lines, due, start, DateTime.Now));
+        await SaveFileAsync($"{PdfKit.FileName(name)}_Statement_{DoctorLedgerStore.Today:ddMMMyyyy}.pdf", bytes);
+    });
+
+    private Task DownloadDuesReportAsync() => RunDownloadAsync("dues", async () =>
+    {
+        var list = dues.ToList();
+        var start = startDate;
+        var bytes = await Task.Run(() => LedgerPdf.DuesReport(list, start, DateTime.Now));
+        await SaveFileAsync($"DoctorDues_{DoctorLedgerStore.Today:ddMMMyyyy}.pdf", bytes);
+    });
+
+    private Task DownloadPaymentsAsync() => RunDownloadAsync("payments", async () =>
+    {
+        var list = VisibleHistory.ToList();
+        var month = historyMonth;
+        var bytes = await Task.Run(() => LedgerPdf.Payments(list, month, DateTime.Now));
+        await SaveFileAsync($"Payments_{month.ToString("MMMyyyy", CultureInfo.InvariantCulture)}.pdf", bytes);
+    });
 
     private DoctorDue? SelectedDue => selectedDocId is { } id ? dues.FirstOrDefault(d => d.DocId == id) : null;
 
